@@ -276,7 +276,7 @@ function serveStatic(request, response, url) {
   const requested = url.pathname === "/" ? "/index.html" : url.pathname;
   const filePath = path.resolve(ROOT, `.${requested}`);
   if (!filePath.startsWith(path.resolve(ROOT)) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) return send(response, 404, { error: "Not found." });
-  const extensions = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8" };
+  const extensions = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".webmanifest": "application/manifest+json; charset=utf-8", ".svg": "image/svg+xml" };
   response.writeHead(200, { "content-type": extensions[path.extname(filePath)] || "application/octet-stream" });
   fs.createReadStream(filePath).pipe(response);
 }
