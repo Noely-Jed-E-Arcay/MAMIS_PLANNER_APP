@@ -5,7 +5,31 @@ const crypto = require("node:crypto");
 
 const PORT = Number(process.env.PORT) || 3000;
 const ROOT = __dirname;
-const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, "data");
+const FALLBACK_DATA_DIR = path.join(ROOT, "data");
+
+function resolveDataDirectory() {
+  const configuredDir = process.env.DATA_DIR;
+  const fallbackDir = FALLBACK_DATA_DIR;
+  if (!configuredDir) return fallbackDir;
+
+  const candidate = path.isAbsolute(configuredDir) ? configuredDir : path.resolve(ROOT, configuredDir);
+
+  try {
+    fs.mkdirSync(candidate, { recursive: true });
+    fs.accessSync(candidate, fs.constants.R_OK | fs.constants.W_OK);
+    return candidate;
+  } catch (error) {
+    console.warn(`DATA_DIR "${configuredDir}" is not writable; using "${fallbackDir}" instead.`);
+    try {
+      fs.mkdirSync(fallbackDir, { recursive: true });
+      return fallbackDir;
+    } catch {
+      return candidate;
+    }
+  }
+}
+
+const DATA_DIR = resolveDataDirectory();
 const DATA_FILE = path.join(DATA_DIR, "server-db.json");
 const MAX_BODY = 15 * 1024 * 1024;
 const SESSION_SECRET_FILE = path.join(DATA_DIR, ".session-secret");
