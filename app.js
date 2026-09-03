@@ -44,6 +44,14 @@ const studyTimer = JSON.parse(localStorage.getItem("LovelyDayPlannerStudyTimer")
 };
 let studyTimerInterval;
 let db;
+let activeAccount;
+let authMode = "login";
+let remoteHydrating = false;
+let remoteSyncTimer;
+const ACCOUNT_KEY = "LovelyDayPlannerAccounts";
+const SESSION_KEY = "LovelyDayPlannerSession";
+const API_BASE = window.PLANNER_CONFIG?.apiBase || "";
+const remoteAuthEnabled = location.protocol !== "file:";
 function localDateKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -77,7 +85,8 @@ const esc = (s) =>
   );
 function openDB() {
   return new Promise((resolve, reject) => {
-    const r = indexedDB.open(DB_NAME, DB_VERSION);
+    const databaseName = activeAccount?.dbName || DB_NAME;
+    const r = indexedDB.open(databaseName, DB_VERSION);
     r.onupgradeneeded = () => {
       const d = r.result;
       stores.forEach((s) => {
@@ -102,16 +111,130 @@ function all(store) {
 function put(store, obj) {
   return new Promise((res, rej) => {
     const r = db.transaction(store, "readwrite").objectStore(store).put(obj);
-    r.onsuccess = () => res(obj);
+    r.onsuccess = () => {
+      scheduleRemoteSync();
+      res(obj);
+    };
     r.onerror = () => rej(r.error);
   });
 }
 function del(store, id) {
   return new Promise((res, rej) => {
     const r = db.transaction(store, "readwrite").objectStore(store).delete(id);
-    r.onsuccess = () => res();
+    r.onsuccess = () => {
+      scheduleRemoteSync();
+      res();
+    };
     r.onerror = () => rej(r.error);
   });
+}
+function apiUrl(pathname) {
+  return `${API_BASE}${pathname}`;
+}
+async function apiRequest(pathname, options = {}) {
+  const headers = { "content-type": "application/json", ...(options.headers || {}) };
+  if (activeAccount?.token) headers.authorization = `Bearer ${activeAccount.token}`;
+  const response = await fetch(apiUrl(pathname), { ...options, headers });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "The planner server is unavailable.");
+  return body;
+}
+function scheduleRemoteSync() {
+  if (!remoteAuthEnabled || !activeAccount?.token || remoteHydrating) return;
+  clearTimeout(remoteSyncTimer);
+  remoteSyncTimer = setTimeout(syncRemotePlanner, 500);
+}
+async function syncRemotePlanner() {
+  if (!remoteAuthEnabled || !activeAccount?.token || remoteHydrating) return;
+  try {
+    await apiRequest("/api/planner", { method: "PUT", body: JSON.stringify({ data: await readData() }) });
+  } catch {
+    toast("Could not sync planner changes.");
+  }
+}
+async function loadRemotePlanner() {
+  if (!activeAccount?.token) return;
+  const { data } = await apiRequest("/api/planner");
+  if (!data) return;
+  remoteHydrating = true;
+  for (const store of stores) for (const item of await all(store)) await del(store, item.id);
+  for (const store of stores) for (const item of data[store] || []) await put(store, item);
+  remoteHydrating = false;
+}
+function getAccounts() {
+  return JSON.parse(localStorage.getItem(ACCOUNT_KEY) || "[]");
+}
+function saveAccounts(accounts) {
+  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(accounts));
+}
+async function hashPassword(password, salt) {
+  const bytes = new TextEncoder().encode(`${salt}:${password}`);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+async function authenticate() {
+  const email = $("#authEmail").value.trim().toLowerCase();
+  const password = $("#authPassword").value;
+  const name = $("#authName").value.trim();
+  const accounts = getAccounts();
+  setAuthMessage(authMode === "register" ? "Creating your account..." : "Logging you in...", false);
+  if (remoteAuthEnabled) {
+    const result = await apiRequest(authMode === "register" ? "/api/register" : "/api/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password, name }),
+    });
+    activeAccount = { ...result.user, token: result.token, dbName: `${DB_NAME}-remote-${result.user.id}` };
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ id: activeAccount.id, token: activeAccount.token }));
+    return true;
+  }
+  if (authMode === "register") {
+    if (accounts.some((account) => account.email === email)) throw new Error("An account with this email already exists.");
+    const salt = uid();
+    activeAccount = { id: uid(), email, name: name || "Lovely", salt, dbName: `${DB_NAME}-${uid()}`, passwordHash: await hashPassword(password, salt) };
+    saveAccounts([...accounts, activeAccount]);
+  } else {
+    const account = accounts.find((candidate) => candidate.email === email);
+    if (!account || account.passwordHash !== await hashPassword(password, account.salt)) throw new Error("Email or password is incorrect.");
+    activeAccount = account;
+  }
+  localStorage.setItem(SESSION_KEY, activeAccount.id);
+  return true;
+}
+function setAuthMessage(message, isError = true) {
+  const element = $("#authMessage");
+  element.textContent = message;
+  element.style.color = isError ? "var(--pink-dark)" : "var(--green)";
+}
+function setAuthMode(mode) {
+  authMode = mode;
+  $$("[data-auth-mode]").forEach((button) => button.classList.toggle("active", button.dataset.authMode === mode));
+  $("#authNameField").classList.toggle("hidden", mode !== "register");
+  $("#authSubmit").innerHTML = mode === "register" ? "Create account <span>→</span>" : "Log in <span>→</span>";
+  $("#authPassword").autocomplete = mode === "register" ? "new-password" : "current-password";
+  setAuthMessage("");
+}
+async function initializeAccount() {
+  if (remoteAuthEnabled) {
+    const session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    if (session?.token) {
+      try {
+        const result = await apiRequest("/api/me", { headers: { authorization: `Bearer ${session.token}` } });
+        activeAccount = { ...result.user, token: session.token, dbName: `${DB_NAME}-remote-${result.user.id}` };
+        return true;
+      } catch {
+        localStorage.removeItem(SESSION_KEY);
+      }
+    }
+    $("#authConfigNote").textContent = "Create an account to keep your planner on this server and access it from other devices.";
+  }
+  const sessionId = localStorage.getItem(SESSION_KEY);
+  activeAccount = remoteAuthEnabled ? null : getAccounts().find((account) => account.id === sessionId);
+  $("#localModeButton").classList.remove("hidden");
+  return Boolean(activeAccount);
+}
+function showPlanner() {
+  $("#authScreen").classList.add("hidden");
+  $("#accountEmail").textContent = activeAccount?.email || "Guest mode";
 }
 async function removeWebDevelopmentSchedule() {
   for (const item of await all("school"))
@@ -146,6 +269,8 @@ async function readData() {
   return Object.fromEntries(stores.map((s, i) => [s, vals[i]]));
 }
 function show(page) {
+  $("#mobileMoreMenu")?.classList.add("hidden");
+  $("[data-mobile-more]")?.setAttribute("aria-expanded", "false");
   $$(".page").forEach((x) => x.classList.toggle("active", x.id === page));
   const nextPage = $(`#${CSS.escape(page)}`);
   nextPage?.classList.remove("page-enter");
@@ -1117,6 +1242,12 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (!b) return;
+  if (b.dataset.mobileMore !== undefined) {
+    const menu = $("#mobileMoreMenu");
+    const isHidden = menu.classList.toggle("hidden");
+    b.setAttribute("aria-expanded", String(!isHidden));
+    return;
+  }
   if (b.dataset.page) {
     show(b.dataset.page);
     return;
@@ -1353,9 +1484,34 @@ $("#importFile").onchange = (e) => {
   importData(e.target.files[0]);
   e.target.value = "";
 };
-(async () => {
+$$('[data-auth-mode]').forEach((button) => {
+  button.onclick = () => setAuthMode(button.dataset.authMode);
+});
+$("#authForm").onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    if (await authenticate()) {
+      await startPlanner();
+    }
+  } catch (error) {
+    setAuthMessage(error.message || "Could not access your account.");
+  }
+};
+$("#localModeButton").onclick = startPlanner;
+$("#accountButton").onclick = async () => {
+  localStorage.removeItem(SESSION_KEY);
+  activeAccount = null;
+  db?.close();
+  location.reload();
+};
+let plannerStarted = false;
+async function startPlanner() {
+  if (plannerStarted) return;
+  plannerStarted = true;
+  showPlanner();
   try {
     await openDB();
+    if (remoteAuthEnabled && activeAccount?.token) await loadRemotePlanner();
     let d = await readData();
     if (
       !d.routines.length &&
@@ -1475,7 +1631,20 @@ $("#importFile").onchange = (e) => {
     for (const date of dates) await syncStreak(date, d);
     await render();
   } catch (err) {
+    plannerStarted = false;
     console.error(err);
     alert("Could not open the planner database: " + err.message);
+  }
+}
+(async () => {
+  try {
+    await openDB();
+    const authenticated = await initializeAccount();
+    if (authenticated) {
+      await startPlanner();
+    }
+  } catch (err) {
+    console.error(err);
+    setAuthMessage(err.message || "Could not connect to your account.");
   }
 })();
