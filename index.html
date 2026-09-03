@@ -242,7 +242,9 @@
 <div id="congratulations" class="congratulations hidden" role="status" aria-live="polite"><div class="congratulations-box"><div class="congratulations-ribbon">🎀</div><p class="eyebrow">REWARD CLAIMED</p><h2>Congratulations!</h2><p>You earned it.</p><strong id="congratulationsReward"></strong><button class="primary-button" onclick="document.querySelector('#congratulations').classList.add('hidden')">Enjoy reward</button></div></div>
 <div id="toast" class="toast"></div>
 <script>
-  window.PLANNER_CONFIG = { apiBase: "" };
+  window.PLANNER_CONFIG = {
+    apiBase: "https://plannerapp-beui.onrender.com",
+  };
 </script>
 <script src="app.js"></script>
 </body>

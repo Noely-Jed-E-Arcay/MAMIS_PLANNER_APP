@@ -66,7 +66,7 @@ function plannerData(database, userId) {
   return database.planners[userId] || null;
 }
 function handleApi(request, response, url) {
-  response.setHeader("access-control-allow-origin", process.env.CLIENT_ORIGIN || "*");
+  response.setHeader("access-control-allow-origin", process.env.CLIENT_ORIGIN || "https://noely-jed-e-arcay.github.io");
   response.setHeader("access-control-allow-headers", "Content-Type, Authorization");
   response.setHeader("access-control-allow-methods", "GET, PUT, POST, OPTIONS");
   if (request.method === "OPTIONS") return send(response, 204, {});

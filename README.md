@@ -36,7 +36,7 @@ Install Node.js 18 or newer, then run:
 npm start
 ```
 
-Open `http://localhost:3000`. The server hosts the planner and API together, so accounts and planner data are shared between browsers that connect to this server.
+Open `http://localhost:3000`. The deployed frontend is configured to call `https://plannerapp-beui.onrender.com`, and the API allows requests from `https://noely-jed-e-arcay.github.io`.
 
 ## Accounts and storage
 
