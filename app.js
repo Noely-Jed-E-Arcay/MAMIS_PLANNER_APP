@@ -153,6 +153,20 @@ async function syncRemotePlanner() {
     toast("Could not sync planner changes.");
   }
 }
+async function loadRemotePlanner() {
+  if (!activeAccount?.token) return;
+  const { data } = await apiRequest("/api/planner");
+  if (!data) return;
+  remoteHydrating = true;
+  try {
+    for (const store of stores) {
+      for (const item of await all(store)) await del(store, item.id);
+      for (const item of data[store] || []) await put(store, item);
+    }
+  } finally {
+    remoteHydrating = false;
+  }
+}
 function ensureAudioContext() {
   try {
     const AudioCtor = window.AudioContext || window.webkitAudioContext;
