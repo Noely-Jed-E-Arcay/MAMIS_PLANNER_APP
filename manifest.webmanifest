@@ -1,0 +1,18 @@
+{
+  "name": "My Planner",
+  "short_name": "Planner",
+  "description": "A cozy planner for tasks, goals, routines, reminders, and streaks.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fff3f7",
+  "theme_color": "#fff3f7",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "assets/logo.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="My Planner logo">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#fff3f7"/>
+      <stop offset="100%" stop-color="#ffe1eb"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="170" fill="#ffd9e8"/>
+  <circle cx="256" cy="256" r="118" fill="#fffdfd"/>
+  <path d="M176 214c0-49 38-88 86-88 23 0 45 9 62 24 15 14 24 34 24 56 0 22-8 37-24 52l-62 57-60-57c-17-14-24-29-24-52z" fill="#f26f9a"/>
+  <path d="M256 350c-26-19-50-36-63-59-13-22-20-46-20-70 0-52 42-95 95-95s95 43 95 95c0 24-7 48-20 70-13 23-37 40-63 59z" fill="#f26f9a" fill-opacity="0.14"/>
+  <text x="256" y="310" text-anchor="middle" font-family="Verdana, sans-serif" font-size="150" font-weight="700" fill="#d85686">M</text>
+</svg>

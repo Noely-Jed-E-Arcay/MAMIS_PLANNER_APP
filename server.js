@@ -125,10 +125,18 @@ function publicUser(user) {
 function plannerData(database, userId) {
   return database.planners[userId] || null;
 }
+function allowedOrigin(request) {
+  const origin = request.headers.origin || "";
+  const configuredOrigin = process.env.CLIENT_ORIGIN || "https://noely-jed-e-arcay.github.io";
+  if (origin === configuredOrigin || /^https?:\/\/localhost(?::\d+)?$/.test(origin) || /^https?:\/\/127\.0\.0\.1(?::\d+)?$/.test(origin)) {
+    return origin;
+  }
+  return configuredOrigin;
+}
 function handleApi(request, response, url) {
-  response.setHeader("access-control-allow-origin", process.env.CLIENT_ORIGIN || "https://noely-jed-e-arcay.github.io");
+  response.setHeader("access-control-allow-origin", allowedOrigin(request));
   response.setHeader("access-control-allow-headers", "Content-Type, Authorization");
-  response.setHeader("access-control-allow-methods", "GET, PUT, POST, OPTIONS");
+  response.setHeader("access-control-allow-methods", "GET, PUT, POST, DELETE, OPTIONS");
   if (request.method === "OPTIONS") return send(response, 204, {});
 
   const database = readDatabase();
@@ -158,6 +166,14 @@ function handleApi(request, response, url) {
     }).catch((error) => send(response, 400, { error: error.message }));
   }
   if (request.method === "POST" && url.pathname === "/api/logout") {
+    return send(response, 200, { ok: true });
+  }
+  if (request.method === "DELETE" && url.pathname === "/api/account") {
+    const user = getUser(request);
+    if (!user) return send(response, 401, { error: "Please log in." });
+    delete database.users[user.id];
+    delete database.planners[user.id];
+    writeDatabase(database);
     return send(response, 200, { ok: true });
   }
   if (url.pathname === "/api/me") {

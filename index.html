@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, minimum-scale=1, maximum-scale=5, user-scalable=yes">
   <meta name="theme-color" content="#fff3f7">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="My Planner">
+  <meta name="description" content="Lovely Day Planner for tasks, study routines, goals, streaks, rewards, and reminders.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+  <link rel="apple-touch-icon" href="assets/logo.svg">
   <title>My Planner ♡</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -218,7 +225,7 @@
       </div>
     </section>
     <section id="rewards" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">CELEBRATE YOUR PROGRESS</p><h2>Reward Station 🎀</h2><p>Claim rewards you have earned from streak milestones and study sessions.</p></div></div><section class="reward-section"><h3>Today’s reward · <span id="rewardDateLabel"></span></h3><div id="rewardDaily" class="reward-list"></div></section><section class="reward-section"><h3>This week’s reward</h3><div id="rewardWeekly" class="reward-list"></div></section><section class="reward-section"><h3>Streak milestone rewards</h3><div id="rewardMilestones" class="reward-list"></div></section><section class="reward-section"><h3>Study break rewards</h3><div id="rewardBreaks" class="reward-list"></div></section></div></section>
-    <section id="settings" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">PERSONALIZE</p><h2>Settings ⚙</h2><p>Make your planner feel like yours.</p></div></div><div class="settings-grid"><label>Planner name<input id="settingsName" type="text" placeholder="Lovely"></label><label>Focus message<textarea id="settingsFocus" placeholder="Be proud of how far you've come."></textarea></label><fieldset class="reward-settings"><legend>Streak rewards</legend><small>Customize what each milestone unlocks.</small><label>Basic reward<input id="rewardBasic" type="text"></label><label>Gold reward<input id="rewardGold" type="text"></label><label>Sapphire reward<input id="rewardSapphire" type="text"></label><label>Ruby reward<input id="rewardRuby" type="text"></label><label>Emerald reward<input id="rewardEmerald" type="text"></label><label>Amethyst reward<input id="rewardAmethyst" type="text"></label><label>Pearl reward<input id="rewardPearl" type="text"></label><label>Diamond reward<input id="rewardDiamond" type="text"></label></fieldset><button class="primary-button" id="saveSettings">Save Settings</button><div class="backup-controls"><button class="soft-button" id="exportData">Download backup</button><button class="soft-button" id="importData">Restore backup</button><input id="importFile" type="file" accept="application/json,.json" hidden><small>Your planner saves automatically in this browser. Use a backup to move it to another device.</small></div><button class="soft-button danger" id="clearData">Reset local planner data</button></div></div></section>
+    <section id="settings" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">PERSONALIZE</p><h2>Settings ⚙</h2><p>Make your planner feel like yours.</p></div></div><div class="settings-grid"><label>Planner name<input id="settingsName" type="text" placeholder="Lovely"></label><label>Focus message<textarea id="settingsFocus" placeholder="Be proud of how far you've come."></textarea></label><fieldset class="reward-settings"><legend>Streak rewards</legend><small>Customize what each milestone unlocks.</small><label>Basic reward<input id="rewardBasic" type="text"></label><label>Gold reward<input id="rewardGold" type="text"></label><label>Sapphire reward<input id="rewardSapphire" type="text"></label><label>Ruby reward<input id="rewardRuby" type="text"></label><label>Emerald reward<input id="rewardEmerald" type="text"></label><label>Amethyst reward<input id="rewardAmethyst" type="text"></label><label>Pearl reward<input id="rewardPearl" type="text"></label><label>Diamond reward<input id="rewardDiamond" type="text"></label></fieldset><button class="primary-button" id="saveSettings">Save Settings</button><div class="backup-controls"><button class="soft-button" id="exportData">Download backup</button><button class="soft-button" id="importData">Restore backup</button><input id="importFile" type="file" accept="application/json,.json" hidden><small>Your planner saves automatically in this browser. Use a backup to move it to another device.</small></div><button class="soft-button danger" id="clearData">Reset local planner data</button><button class="soft-button danger" id="deleteAccount">Delete account permanently</button></div></div></section>
   </main>
 </div>
 
@@ -243,7 +250,9 @@
 <div id="toast" class="toast"></div>
 <script>
   window.PLANNER_CONFIG = {
-    apiBase: "https://plannerapp-beui.onrender.com",
+    apiBase: ["localhost", "127.0.0.1"].includes(location.hostname)
+      ? ""
+      : "https://plannerapp-beui.onrender.com",
   };
 </script>
 <script src="app.js"></script>

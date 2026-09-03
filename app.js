@@ -48,6 +48,7 @@ let activeAccount;
 let authMode = "login";
 let remoteHydrating = false;
 let remoteSyncTimer;
+let reminderAlertTimer;
 const ACCOUNT_KEY = "LovelyDayPlannerAccounts";
 const SESSION_KEY = "LovelyDayPlannerSession";
 const API_BASE = window.PLANNER_CONFIG?.apiBase || "";
@@ -152,14 +153,65 @@ async function syncRemotePlanner() {
     toast("Could not sync planner changes.");
   }
 }
-async function loadRemotePlanner() {
-  if (!activeAccount?.token) return;
-  const { data } = await apiRequest("/api/planner");
-  if (!data) return;
-  remoteHydrating = true;
-  for (const store of stores) for (const item of await all(store)) await del(store, item.id);
-  for (const store of stores) for (const item of data[store] || []) await put(store, item);
-  remoteHydrating = false;
+function ensureAudioContext() {
+  try {
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtor) return null;
+    if (!window.__plannerAudioCtx) window.__plannerAudioCtx = new AudioCtor();
+    return window.__plannerAudioCtx;
+  } catch {
+    return null;
+  }
+}
+function playSound(type = "achievement") {
+  try {
+    const ctx = ensureAudioContext();
+    if (!ctx) return;
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    const preset = {
+      achievement: { frequencies: [440, 660, 880], type: "triangle", duration: 0.18 },
+      streak: { frequencies: [392, 523, 659, 784], type: "sine", duration: 0.22 },
+      timer: { frequencies: [740, 640, 520], type: "square", duration: 0.16 },
+      reminder: { frequencies: [620, 770, 980], type: "sawtooth", duration: 0.2 },
+    }[type] || { frequencies: [523, 698], type: "triangle", duration: 0.18 };
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    gainNode.gain.setValueAtTime(0.0001, now);
+    gainNode.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + preset.duration);
+    oscillator.type = preset.type;
+    preset.frequencies.forEach((frequency, index) => oscillator.frequency.setValueAtTime(frequency, now + index * 0.08));
+    oscillator.start(now);
+    oscillator.stop(now + preset.duration + 0.05);
+  } catch {
+    // Audio is optional and must never interrupt planner actions.
+  }
+}
+function triggerSoundOnUserInteraction() {
+  ensureAudioContext();
+}
+async function checkReminderAlerts() {
+  try {
+    const data = await readData();
+    const now = Date.now();
+    for (const reminder of (data.reminders || []).filter((item) => item.date && item.time && !item.notifiedAt)) {
+      const when = new Date(`${reminder.date}T${reminder.time}:00`).getTime();
+      if (when <= now) {
+        playSound("reminder");
+        reminder.notifiedAt = now;
+        await put("reminders", reminder);
+        toast(`Reminder: ${reminder.title} 🔔`, true);
+      }
+    }
+  } catch (error) {
+    console.warn("Reminder alert check failed:", error);
+  }
+}
+function startReminderChecks() {
+  if (!reminderAlertTimer) reminderAlertTimer = setInterval(checkReminderAlerts, 15000);
 }
 function getAccounts() {
   return JSON.parse(localStorage.getItem(ACCOUNT_KEY) || "[]");
@@ -400,6 +452,7 @@ function startStudyTimer() {
         clearInterval(studyTimerInterval);
         toast("Study session complete ♡");
         grantStudyBreakReward();
+        playSound("timer");
       }
       saveStudyTimer();
       $("#studyTimerDisplay").textContent = formatTimer(studyTimer.remaining);
@@ -541,6 +594,7 @@ function renderStreak(data) {
     ? "Reward: Take a relaxing break"
     : "Complete a task today to unlock your reward";
   if (currentLevel && currentLevel.goal > (Number(settings.rewardAlertLevel) || 0)) {
+    playSound("streak");
     toast(`🎀 ${currentLevel.name} unlocked! Claim your reward: ${rewards[currentLevel.name]}`);
     put("settings", { ...settings, rewardAlertLevel: currentLevel.goal });
   }
@@ -685,6 +739,7 @@ async function claimReward(id) {
   reward.claimed = true;
   reward.claimedAt = Date.now();
   await put("rewards", reward);
+  playSound("achievement");
   await render();
   showCongratulations(reward);
   toast(`Reward claimed: ${reward.description || "Enjoy it!"} 🎀`, true);
@@ -1212,9 +1267,23 @@ async function toggle(store, id) {
       `[data-toggle-${store === "routines" ? "r" : store === "activities" ? "a" : "g"}="${CSS.escape(id)}"]`,
     )?.closest(".item, .event");
     item?.classList.add("just-completed");
+    playSound("achievement");
     toast("Great job! Task completed 🎀", true);
   } else {
     toast("Marked active");
+  }
+}
+async function ensurePlannerProfileName() {
+  const desiredName = activeAccount?.name || "Lovely";
+  const data = await readData();
+  const settings = data.settings.find((x) => x.id === "main") || { id: "main" };
+  if (!settings.name || settings.name !== desiredName) {
+    await put("settings", {
+      ...settings,
+      id: "main",
+      name: desiredName,
+      focus: settings.focus || "Be proud of how far you've come.",
+    });
   }
 }
 async function render() {
@@ -1223,7 +1292,7 @@ async function render() {
   $("#currentDate").value = currentDate;
   window.__data = data;
   const settings = data.settings.find((x) => x.id === "main") || {};
-  window.plannerName = settings.name || "Lovely";
+  window.plannerName = activeAccount?.name || settings.name || "Lovely";
   window.plannerFocus = settings.focus || "Be proud of how far you've come.";
   $("#profileName").textContent = `Hello, ${window.plannerName}!`;
   const active = $(".page.active")?.id || "dashboard";
@@ -1232,6 +1301,8 @@ async function render() {
       `Good morning, ${esc(window.plannerName)}! <span>☀️</span>`;
   renderPage(active, data);
 }
+document.addEventListener("pointerdown", triggerSoundOnUserInteraction, { passive: true });
+document.addEventListener("keydown", triggerSoundOnUserInteraction, { passive: true });
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   const dateEl = e.target.closest("[data-calendar-date]");
@@ -1405,6 +1476,32 @@ $("#clearData").onclick = async () => {
   toast("Planner reset");
   location.reload();
 };
+$("#deleteAccount").onclick = async () => {
+  if (!confirm("Delete this account permanently? This removes the account, password, and all saved planner data.")) return;
+  try {
+    if (remoteAuthEnabled && activeAccount?.token) {
+      await apiRequest("/api/account", { method: "DELETE" });
+    } else {
+      const currentId = activeAccount?.id || localStorage.getItem(SESSION_KEY);
+      const accounts = getAccounts().filter((account) => account.id !== currentId);
+      saveAccounts(accounts);
+      if (activeAccount?.dbName) {
+        await new Promise((resolve, reject) => {
+          const request = indexedDB.deleteDatabase(activeAccount.dbName);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error || new Error("Could not delete the local database."));
+          request.onblocked = () => resolve();
+        }).catch(() => {});
+      }
+    }
+    if (db) db.close();
+    localStorage.removeItem(SESSION_KEY);
+    location.reload();
+    toast("Account deleted");
+  } catch (error) {
+    toast(error.message || "Could not delete account.");
+  }
+};
 $("#notificationButton").onclick = async () => {
   renderNotifications(await readData());
 };
@@ -1509,6 +1606,7 @@ async function startPlanner() {
   if (plannerStarted) return;
   plannerStarted = true;
   showPlanner();
+  startReminderChecks();
   try {
     await openDB();
     if (remoteAuthEnabled && activeAccount?.token) await loadRemotePlanner();
@@ -1517,112 +1615,22 @@ async function startPlanner() {
       !d.routines.length &&
       !d.school.length &&
       !d.activities.length &&
-      !d.notes.length
+      !d.notes.length &&
+      !d.goals.length &&
+      !d.habits.length &&
+      !d.reminders.length &&
+      !d.journal.length &&
+      !d.decks.length &&
+      !d.rewards.length &&
+      !d.streaks.length
     ) {
-      const now = currentDate;
-      await put("routines", {
-        id: uid(),
-        title: "Morning Routine",
-        description: "Get ready, breakfast, journal",
-        time: "07:00",
-        date: now,
-        category: "routine",
-        done: true,
-        minutes: 20,
-        updated: Date.now(),
-      });
-      await put("routines", {
-        id: uid(),
-        title: "Study Session",
-        description: "Review notes & practice",
-        time: "10:00",
-        date: now,
-        category: "study",
-        done: false,
-        minutes: 65,
-        updated: Date.now(),
-      });
-      await put("routines", {
-        id: uid(),
-        title: "Personal Time",
-        description: "Read a book / watch a movie",
-        time: "18:00",
-        date: now,
-        category: "personal",
-        done: false,
-        minutes: 45,
-        updated: Date.now(),
-      });
-      await put("school", {
-        id: uid(),
-        subject: "Web Development",
-        teacher: "Your Teacher",
-        room: "Lab 2",
-        start: "08:00",
-        end: "09:30",
-        date: now,
-        color: "lavender",
-      });
-      await put("activities", {
-        id: uid(),
-        title: "Finish UI Design",
-        description: "Complete the dashboard prototype.",
-        due: now,
-        time: "17:00",
-        type: "assignment",
-        priority: "high",
-        done: false,
-        updated: Date.now(),
-      });
-      await put("activities", {
-        id: uid(),
-        title: "Review for Quiz",
-        description: "Read the next chapter.",
-        due: now,
-        time: "19:00",
-        type: "quiz",
-        priority: "medium",
-        done: true,
-        updated: Date.now(),
-      });
-      await put("notes", {
-        id: uid(),
-        title: "Web Development Notes",
-        content:
-          "Remember: keep your components organized and your layout responsive.",
-        image: "",
-        updated: Date.now(),
-      });
-      await put("decks", {
-        id: "school",
-        name: "School",
-        progress: 33,
-        icon: "🏠",
-      });
-      await put("decks", {
-        id: "streak",
-        name: "Streak",
-        progress: 64,
-        icon: "🔥",
-      });
-      await put("decks", {
-        id: "study",
-        name: "Study",
-        progress: 42,
-        icon: "📁",
-      });
-      await put("decks", {
-        id: "profile",
-        name: "Profile",
-        progress: 0,
-        icon: "🌸",
-      });
       await put("settings", {
         id: "main",
-        name: "Lovely",
+        name: activeAccount?.name || "Lovely",
         focus: "Be proud of how far you've come.",
       });
     }
+    await ensurePlannerProfileName();
     d = await readData();
     const dates = new Set([
       ...d.routines.filter((x) => x.done).map((x) => x.date),
