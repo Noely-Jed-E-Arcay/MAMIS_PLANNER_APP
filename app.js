@@ -182,24 +182,26 @@ function playSound(type = "achievement") {
     const ctx = ensureAudioContext();
     if (!ctx) return;
     if (ctx.state === "suspended") ctx.resume().catch(() => {});
-    const now = ctx.currentTime;
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
     const preset = {
-      achievement: { frequencies: [440, 660, 880], type: "triangle", duration: 0.18 },
-      streak: { frequencies: [392, 523, 659, 784], type: "sine", duration: 0.22 },
-      timer: { frequencies: [740, 640, 520], type: "square", duration: 0.16 },
-      reminder: { frequencies: [620, 770, 980], type: "sawtooth", duration: 0.2 },
-    }[type] || { frequencies: [523, 698], type: "triangle", duration: 0.18 };
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    gainNode.gain.setValueAtTime(0.0001, now);
-    gainNode.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + preset.duration);
-    oscillator.type = preset.type;
-    preset.frequencies.forEach((frequency, index) => oscillator.frequency.setValueAtTime(frequency, now + index * 0.08));
-    oscillator.start(now);
-    oscillator.stop(now + preset.duration + 0.05);
+      achievement: { frequencies: [440, 660, 880], type: "triangle", duration: 0.18, volume: 0.18, repeats: 1, gap: 0.08 },
+      streak: { frequencies: [392, 523, 659, 784], type: "sine", duration: 0.22, volume: 0.2, repeats: 1, gap: 0.08 },
+      timer: { frequencies: [740, 640, 520], type: "square", duration: 0.28, volume: 0.38, repeats: 8, gap: 0.12 },
+      reminder: { frequencies: [620, 770, 980], type: "sawtooth", duration: 0.32, volume: 0.4, repeats: 10, gap: 0.16 },
+    }[type] || { frequencies: [523, 698], type: "triangle", duration: 0.18, volume: 0.18, repeats: 1, gap: 0.08 };
+    for (let repeat = 0; repeat < preset.repeats; repeat++) {
+      const start = ctx.currentTime + repeat * (preset.duration + preset.gap);
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      gainNode.gain.setValueAtTime(0.0001, start);
+      gainNode.gain.exponentialRampToValueAtTime(preset.volume, start + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, start + preset.duration);
+      oscillator.type = preset.type;
+      preset.frequencies.forEach((frequency, index) => oscillator.frequency.setValueAtTime(frequency, start + index * (preset.duration / preset.frequencies.length)));
+      oscillator.start(start);
+      oscillator.stop(start + preset.duration + 0.05);
+    }
   } catch {
     // Audio is optional and must never interrupt planner actions.
   }
@@ -776,7 +778,7 @@ function renderDashboard(data) {
     ...routines.map((x) => ({
       time: x.time,
       title: x.title,
-      meta: x.description,
+      meta: `${x.endTime ? `${formatTime(x.time)}–${formatTime(x.endTime)} · ` : ""}${x.description || ""}`,
       done: x.done,
       color:
         x.category === "study"
@@ -788,9 +790,9 @@ function renderDashboard(data) {
       edit: `data-edit-r="${x.id}"`,
     })),
     ...acts.map((x) => ({
-      time: x.time,
+      time: x.startTime || x.time,
       title: x.title,
-      meta: `${x.type || "Task"}${x.description ? " · " + x.description : ""}`,
+      meta: `${x.startTime && x.time ? `${formatTime(x.startTime)}–${formatTime(x.time)} · ` : ""}${x.type || "Task"}${x.description ? " · " + x.description : ""}`,
       done: x.done,
       color: "peach",
       toggle: `data-toggle-a="${x.id}"`,
@@ -823,6 +825,11 @@ function renderDashboard(data) {
         )
         .join("")
     : `<div class="empty">Add a task to jump back in ♡</div>`;
+  const allTasks = [...data.activities]
+    .sort((a, b) => `${a.due}-${a.time || "23:59"}`.localeCompare(`${b.due}-${b.time || "23:59"}`));
+  $("#dashboardTaskList").innerHTML = allTasks.length
+    ? allTasks.map((task) => `<article class="dashboard-task ${task.done ? "completed" : ""}"><div><strong>${esc(task.title)}</strong><small>${esc(fmt(task.due))} · ${task.startTime ? `${esc(formatTime(task.startTime))}–` : ""}${task.time ? esc(formatTime(task.time)) : "No due time"}</small></div><button class="small-button" data-toggle-a="${esc(task.id)}">${task.done ? "Undo" : "Done"}</button></article>`).join("")
+    : `<div class="empty">No tasks saved yet. Add your first task ✨</div>`;
   const decks = data.decks.length
     ? data.decks
     : [
@@ -1132,11 +1139,11 @@ function form(type, x = {}) {
   const defs = {
     routine: {
       title: x.id ? "Edit Routine" : "Add Routine",
-      body: `<label>Title<input name="title" required value="${esc(x.title)}" placeholder="Morning routine"></label><div class="two"><label>Time<input name="time" type="time" required value="${esc(x.time || "07:00")}"></label><label>Date<input name="date" type="date" required value="${esc(x.date || currentDate)}"></label></div><label>Description<textarea name="description">${esc(x.description)}</textarea></label><label>Category<select name="category">${["routine", "study", "break", "personal", "health"].map((v) => `<option ${x.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Study duration (minutes)<input name="minutes" type="number" min="1" max="720" value="${Number(x.minutes) || 45}"><small>Used by the study timer when this is a study schedule.</small></label>`,
+      body: `<label>Title<input name="title" required value="${esc(x.title)}" placeholder="Morning routine"></label><div class="two"><label>Start time<input name="time" type="time" required value="${esc(x.time || "07:00")}"></label><label>Due time<input name="endTime" type="time" required value="${esc(x.endTime || "08:00")}"></label></div><label>Date<input name="date" type="date" required value="${esc(x.date || currentDate)}"></label><label>Description<textarea name="description">${esc(x.description)}</textarea></label><label>Category<select name="category">${["routine", "study", "break", "personal", "health"].map((v) => `<option ${x.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Study duration (minutes)<input name="minutes" type="number" min="1" max="720" value="${Number(x.minutes) || 45}"><small>Used by the study timer when this is a study schedule.</small></label>`,
     },
     activity: {
       title: x.id ? "Edit Task" : "Add Task",
-      body: `<label>Title<input name="title" required value="${esc(x.title)}"></label><label>Description<textarea name="description">${esc(x.description)}</textarea></label><div class="two"><label>Due date<input name="due" type="date" required value="${esc(x.due || currentDate)}"></label><label>Due time<input name="time" type="time" value="${esc(x.time)}"></label></div><div class="two"><label>Type<select name="type">${["assignment", "quiz", "project", "presentation", "event", "other"].map((v) => `<option ${x.type === v ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Priority<select name="priority">${["low", "medium", "high"].map((v) => `<option ${x.priority === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>`,
+      body: `<label>Title<input name="title" required value="${esc(x.title)}"></label><label>Description<textarea name="description">${esc(x.description)}</textarea></label><label>Due date<input name="due" type="date" required value="${esc(x.due || currentDate)}"></label><div class="two"><label>Start time<input name="startTime" type="time" required value="${esc(x.startTime || "09:00")}"></label><label>Due time<input name="time" type="time" required value="${esc(x.time || "10:00")}"></label></div><div class="two"><label>Type<select name="type">${["assignment", "quiz", "project", "presentation", "event", "other"].map((v) => `<option ${x.type === v ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Priority<select name="priority">${["low", "medium", "high"].map((v) => `<option ${x.priority === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>`,
     },
     note: {
       title: x.id ? "Edit Note" : "New Note",

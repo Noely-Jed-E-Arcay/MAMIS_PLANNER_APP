@@ -867,7 +867,8 @@ button {
   font-weight: 700;
 }
 .jump-section,
-.deck-section {
+.deck-section,
+.dashboard-tasks {
   padding: 0 2px;
 }
 .list-heading {
@@ -891,6 +892,38 @@ button {
   grid-template-columns: 1fr 1fr;
   gap: 9px;
   overflow: hidden;
+}
+.dashboard-task-list {
+  display: grid;
+  gap: 8px;
+}
+.dashboard-task {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid #f0e3e9;
+  border-radius: 12px;
+  background: #fff;
+}
+.dashboard-task > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.dashboard-task strong,
+.dashboard-task small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dashboard-task small {
+  color: var(--muted);
+}
+.dashboard-task.completed strong {
+  color: var(--muted);
+  text-decoration: line-through;
 }
 .jump-card {
   min-width: 0;
