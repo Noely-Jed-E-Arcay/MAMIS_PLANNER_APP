@@ -34,7 +34,9 @@ const DATA_FILE = path.join(DATA_DIR, "server-db.json");
 const MAX_BODY = 15 * 1024 * 1024;
 const SESSION_SECRET_FILE = path.join(DATA_DIR, ".session-secret");
 const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
-const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+const SUPABASE_URL = (process.env.SUPABASE_URL || "")
+  .replace(/\/rest\/v1\/?$/, "")
+  .replace(/\/$/, "");
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const useSupabase = Boolean(SUPABASE_URL && SUPABASE_KEY);
 
