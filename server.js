@@ -5,15 +5,37 @@ const crypto = require("node:crypto");
 
 const PORT = Number(process.env.PORT) || 3000;
 const ROOT = __dirname;
-const DATA_DIR = path.join(ROOT, "data");
+const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, "data");
 const DATA_FILE = path.join(DATA_DIR, "server-db.json");
 const MAX_BODY = 15 * 1024 * 1024;
-const sessions = new Map();
+const SESSION_SECRET_FILE = path.join(DATA_DIR, ".session-secret");
+const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+function sessionSecret() {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(SESSION_SECRET_FILE)) {
+    fs.writeFileSync(SESSION_SECRET_FILE, crypto.randomBytes(32).toString("hex"));
+  }
+  return fs.readFileSync(SESSION_SECRET_FILE, "utf8").trim();
+}
+
+function signSession(payload) {
+  return crypto.createHmac("sha256", sessionSecret()).update(payload).digest("base64url");
+}
 
 function readDatabase() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(DATA_FILE)) return { users: {}, planners: {} };
-  return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  try {
+    const database = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    if (!database || typeof database !== "object" || !database.users || !database.planners) {
+      throw new Error("Database must contain users and planners.");
+    }
+    return database;
+  } catch (error) {
+    throw new Error(`Could not read the planner database: ${error.message}`);
+  }
 }
 function writeDatabase(database) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -30,8 +52,20 @@ function getToken(request) {
   return header.startsWith("Bearer ") ? header.slice(7) : "";
 }
 function getUser(request) {
-  const userId = sessions.get(getToken(request));
-  return userId ? readDatabase().users[userId] : null;
+  const token = getToken(request);
+  const [encodedPayload, signature] = token.split(".");
+  if (!encodedPayload || !signature) return null;
+  const expectedSignature = signSession(encodedPayload);
+  const actual = Buffer.from(signature);
+  const expected = Buffer.from(expectedSignature);
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+    if (!payload.userId || payload.expiresAt < Math.floor(Date.now() / 1000)) return null;
+    return readDatabase().users[payload.userId] || null;
+  } catch {
+    return null;
+  }
 }
 function parseBody(request) {
   return new Promise((resolve, reject) => {
@@ -55,9 +89,11 @@ function passwordMatches(password, record) {
   return crypto.timingSafeEqual(candidate, Buffer.from(record.hash, "hex"));
 }
 function createSession(userId) {
-  const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, userId);
-  return token;
+  const payload = Buffer.from(JSON.stringify({
+    userId,
+    expiresAt: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
+  })).toString("base64url");
+  return `${payload}.${signSession(payload)}`;
 }
 function publicUser(user) {
   return { id: user.id, email: user.email, name: user.name };
@@ -98,7 +134,6 @@ function handleApi(request, response, url) {
     }).catch((error) => send(response, 400, { error: error.message }));
   }
   if (request.method === "POST" && url.pathname === "/api/logout") {
-    sessions.delete(getToken(request));
     return send(response, 200, { ok: true });
   }
   if (url.pathname === "/api/me") {

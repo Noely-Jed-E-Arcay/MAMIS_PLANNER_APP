@@ -42,7 +42,7 @@ Open `http://localhost:3000`. The deployed frontend is configured to call `https
 
 The Node server stores accounts and planner snapshots in `data/server-db.json`. Passwords use Node's `scrypt` hash, and each login receives a session token. The browser keeps an IndexedDB cache and synchronizes changes to the server automatically.
 
-For production, deploy `server.js` to a Node host with persistent disk storage and HTTPS. Do not use ephemeral storage, or the database file will be lost on restart. The frontend can be hosted by this same server or configured with `window.PLANNER_CONFIG.apiBase` in `index.html` to point to the HTTPS server URL. If frontend and backend use different domains, set the server's `CLIENT_ORIGIN` environment variable to the frontend origin.
+For production, deploy `server.js` to a Node host with persistent disk storage and HTTPS. Do not use ephemeral storage, or the database file will be lost on restart. Set `DATA_DIR` to the mounted disk directory (for example, `/var/data` on Render) and set a stable random `SESSION_SECRET` environment variable. The frontend can be hosted by this same server or configured with `window.PLANNER_CONFIG.apiBase` in `index.html` to point to the HTTPS server URL. If frontend and backend use different domains, set the server's `CLIENT_ORIGIN` environment variable to the frontend origin.
 
 ## GitHub Pages
 
