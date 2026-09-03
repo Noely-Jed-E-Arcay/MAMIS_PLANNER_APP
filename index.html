@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#fff3f7">
+  <title>My Planner ♡</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&family=Quicksand:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div>My Planner <span>♡</span></div>
+      <small>stay organized, stay happy</small>
+    </div>
+
+    <nav class="nav-list" aria-label="Main navigation">
+      <button class="nav active" data-page="dashboard"><span class="nav-icon">⌂</span><span>Dashboard</span></button>
+      <button class="nav" data-page="calendar"><span class="nav-icon">▣</span><span>Calendar</span></button>
+      <button class="nav" data-page="routine"><span class="nav-icon">☼</span><span>My Schedule</span></button>
+      <button class="nav" data-page="activities"><span class="nav-icon">✓</span><span>Tasks</span></button>
+      <button class="nav" data-page="notes"><span class="nav-icon">▤</span><span>Notes</span></button>
+      <button class="nav" data-page="goals"><span class="nav-icon">♧</span><span>Goals</span></button>
+      <button class="nav" data-page="habits"><span class="nav-icon">♡</span><span>Habit Tracker</span></button>
+      <button class="nav" data-page="reminders"><span class="nav-icon">♧</span><span>Reminders</span></button>
+      <button class="nav" data-page="journal"><span class="nav-icon">▤</span><span>Journal</span></button>
+      <button class="nav" data-page="rewards"><span class="nav-icon">🎀</span><span>Reward Station</span></button>
+      <button class="nav" data-page="settings"><span class="nav-icon">⚙</span><span>Settings</span></button>
+    </nav>
+
+    <div class="side-art">
+      <div class="art-sky">☁︎　☁︎</div>
+      <div class="art-window">♡</div>
+      <div class="art-desk">▰</div>
+      <div class="art-plant">🌷</div>
+      <div class="art-chair">◡</div>
+    </div>
+
+    <button class="profile-card" data-page="settings">
+      <span class="avatar">🌸</span>
+      <span class="profile-copy"><b id="profileName">Hello, Lovely!</b><small>You've got this! 🎀</small></span>
+      <span class="chevron">⌄</span>
+    </button>
+  </aside>
+
+  <main class="main-content">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">YOUR LITTLE CORNER OF PRODUCTIVITY</p>
+        <h1 id="pageTitle">Good morning, Lovely! <span>☀️</span></h1>
+        <p class="subtitle">Plan your day, stay productive, and make time for yourself.</p>
+      </div>
+      <div class="top-actions">
+        <label class="date-pill" title="Choose planner date">▣ <input id="currentDate" type="date"></label>
+        <button class="icon-button" id="notificationButton" title="Notifications">♧<span class="notification-dot"></span></button>
+      </div>
+    </header>
+
+    <section id="dashboard" class="page active">
+      <div class="stats-grid">
+        <article class="stat-card pink-card">
+          <div><small>Today's Focus</small><strong id="focusText">Be proud of how far you've come.</strong></div><span class="stat-icon">🎀</span><span class="heart">♡</span>
+        </article>
+        <article class="stat-card lavender-card">
+          <div><small>Tasks Completed</small><strong id="completedStat">0 / 0</strong><div class="progress-track"><span id="taskProgress"></span></div></div><span class="bear">🧸</span>
+        </article>
+        <article class="stat-card peach-card">
+          <div><small>Study Time</small><strong id="studyStat">0h 00m</strong></div><span class="stat-icon">📖</span>
+        </article>
+        <article class="stat-card rose-card">
+          <div><small>Upcoming</small><strong id="upcomingStat">0 Events</strong></div><span class="stat-icon">🗓️</span>
+        </article>
+      </div>
+
+      <div class="dashboard-grid">
+        <section class="card schedule-card">
+          <div class="section-heading">
+            <div><p class="eyebrow">TODAY</p><h2>Today's Schedule & Tasks <span>♡</span></h2></div>
+            <div class="heading-actions"><button class="primary-button" data-add="routine">＋ Add Schedule</button><button class="soft-button" data-add="activity">＋ Add Task</button></div>
+            <div class="heading-actions"><button class="soft-button" id="todayButton">Today</button><button class="circle-button" id="prevDay">‹</button><button class="circle-button" id="nextDay">›</button></div>
+          </div>
+          <div id="timeline" class="timeline"></div>
+          <section class="study-timer" aria-label="Study timer">
+            <div class="study-timer-heading"><div><p class="eyebrow">FOCUS SESSION</p><h3>Study Timer</h3></div><span id="studyTimerStatus">Add a study schedule first</span></div>
+            <label>Study schedule<select id="studyTimerSelect"><option value="">No study schedules today</option></select></label>
+            <strong id="studyTimerDisplay">00:00</strong>
+            <div class="study-timer-actions"><button class="primary-button" id="studyTimerStart" disabled>Start</button><button class="soft-button" id="studyTimerReset" disabled>Reset</button></div>
+          </section>
+        </section>
+
+        <aside class="right-column">
+          <section class="card mini-calendar-card">
+            <div class="section-heading compact"><h2>Monthly Calendar <span>♡</span></h2></div>
+            <div class="calendar-head"><button id="prevMonth">‹</button><b id="monthLabel">May 2025</b><button id="nextMonth">›</button></div>
+            <div class="weekdays"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+            <div id="monthGrid" class="month-grid"></div>
+          </section>
+
+          <section class="card streak-card">
+            <div class="section-heading compact"><h2>Keep your streak! <span>🌼</span></h2><button class="share-button" id="shareButton">↗</button></div>
+            <div class="streak-goal"><div class="flame-ring">🌼</div><div><strong id="streakQuestions">2 questions</strong><small>to continue your streak</small></div></div>
+            <div class="streak-status"><div class="streak-status-top"><div><small>STREAK STATUS</small><strong id="streakLevel">Getting started</strong></div><b id="streakTotal">0 completed</b></div><div class="streak-progress"><span id="streakProgress"></span></div><small id="streakNextLevel">Complete 1 task to reach Basic</small></div>
+            <div class="streak-reward" id="streakReward">Complete tasks to unlock your first reward</div>
+            <div class="streak-levels"><span data-level="Basic">Basic · 1</span><span data-level="Gold">Gold · 3</span><span data-level="Sapphire">Sapphire · 5</span><span data-level="Ruby">Ruby · 7</span><span data-level="Emerald">Emerald · 9</span><span data-level="Amethyst">Amethyst · 11</span><span data-level="Pearl">Pearl · 13</span><span data-level="Diamond">Diamond · 15</span></div>
+            <div class="streak-week" id="streakWeek"></div>
+            <button class="streak-cta" data-page="activities">🎀 Keep your <span id="streakCountLabel">3 day</span> streak</button>
+          </section>
+
+          <section class="jump-section">
+            <div class="list-heading"><h2>Jump back in</h2><button class="link-button" data-page="activities">View all</button></div>
+            <div id="jumpBack" class="jump-cards"></div>
+          </section>
+
+          <section class="deck-section">
+            <div class="list-heading"><h2>Deck progress</h2><button class="link-button" data-page="notes">View all</button></div>
+            <div id="deckProgress" class="deck-card"></div>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <section id="calendar" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">PLAN AHEAD</p><h2>Calendar ♡</h2><p>See your classes, routines, tasks, and notes by date.</p></div></div><div class="calendar-page-grid"><div class="large-calendar" id="largeCalendar"></div><div class="day-summary" id="daySummary"></div></div></div></section>
+
+    <section id="routine" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">DAILY ROUTINE</p><h2>My Schedule 🌷</h2><p>Build a routine that makes your day feel calmer.</p></div><button class="primary-button" data-add="routine">＋ Add Routine</button></div><div id="routineList" class="item-list"></div></div></section>
+
+    <section id="activities" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">SCHOOL LIFE</p><h2>Tasks & Assignments ✨</h2><p>Track quizzes, projects, homework, presentations, and events.</p></div><button class="primary-button" data-add="activity">＋ Add Task</button></div><div id="activityList" class="item-list"></div></div></section>
+
+    <section id="notes" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">STUDY CORNER</p><h2>My Notes 📝</h2><p>Save notes and attach images, documents, presentations, PDFs, and other study files.</p></div><button class="primary-button" data-add="note">＋ New Note</button></div><div id="notesList" class="notes-grid"></div></div></section>
+
+    <section id="goals" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">DREAM BIG</p><h2>My Goals ♡</h2><p>Keep your school and personal goals visible.</p></div><button class="primary-button" data-add="goal">＋ Add Goal</button></div><div id="goalList" class="item-list"></div></div></section>
+    <section id="habits" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">CONSISTENCY</p><h2>Habit Tracker 🌱</h2><p>Small habits add up to big changes.</p></div><button class="primary-button" data-add="habit">＋ Add Habit</button></div><div id="habitList" class="habit-grid"></div></div></section>
+    <section id="reminders" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">DON'T FORGET</p><h2>Reminders 🔔</h2><p>Keep important little reminders in one place.</p></div><button class="primary-button" data-add="reminder">＋ Add Reminder</button></div><div id="reminderList" class="item-list"></div></div></section>
+    <section id="journal" class="page"><div class="page-card journal-workspace"><div class="journal-banner"><span>☁︎</span><span>☼</span><span>☁︎</span></div><div class="journal-title-row"><div><p class="eyebrow">A LITTLE SPACE FOR YOU</p><h2>Self-reflection Journal <span>💗</span></h2><p class="journal-prompt">If you're in a bad mood, take a deep breath. If you're in a good mood, give thanks to God.</p></div><button class="primary-button" data-add="journal">＋ New Page</button></div><div class="journal-day-strip"><div class="journal-date-card"><strong id="journalDayNumber">03</strong><span id="journalDayName">THU</span></div><div class="journal-weather"><span>☁️</span><div><b id="journalWeatherDate">Thursday, September 3</b><small>Today is a good day to reflect</small></div></div><div class="journal-week"><span>Mon</span><span>Tue</span><span>Wed</span><span class="today">Thu</span><span>Fri</span></div></div><div class="journal-toolbar"><label class="journal-search">⌕<input id="journalSearch" type="search" placeholder="Search journal pages..."></label><span id="journalCount">0 pages</span></div><div class="journal-entry-heading"><span>▣ Journal Entries</span><small>Keep your thoughts somewhere safe</small></div><div id="journalList" class="journal-grid"></div></div></section>
+
+    <section id="journal-editor" class="page journal-page-view">
+      <div class="journal-page-shell">
+        <div class="journal-page-banner">
+          <p>You're editing a template in <span class="journal-page-badge"><span aria-hidden="true">📔</span> Daily Journal Entries</span></p>
+          <button type="button" class="journal-page-repeat-btn">Repeat every...</button>
+        </div>
+        <header class="journal-page-header">
+          <div class="journal-page-header-actions">
+            <button type="button" class="journal-page-action-btn">Share</button>
+            <button type="button" class="journal-page-icon-btn" title="Updated">🕐</button>
+            <button type="button" class="journal-page-icon-btn" title="Favorite">☆</button>
+            <button type="button" class="journal-page-icon-btn" title="More">⋯</button>
+          </div>
+        </header>
+        <div class="journal-page-inner">
+          <input type="text" id="journalPageTitle" class="journal-page-title" placeholder="Untitled" value="My Daily Journal">
+          <div class="journal-page-properties">
+            <div class="journal-page-property journal-page-property-date">
+              <span class="journal-page-property-icon">📅</span>
+              <span class="journal-page-property-name">Date</span>
+              <div class="journal-page-property-value">
+                <button type="button" id="journalPageDateTrigger" class="journal-page-date-trigger">Empty</button>
+                <input type="date" id="journalPageDate" class="journal-page-date-input" tabindex="-1" aria-hidden="true">
+              </div>
+            </div>
+            <div id="journalPageCustomProperties"></div>
+            <div class="journal-page-add-property-wrap">
+              <button type="button" id="journalPageAddProperty" class="journal-page-add-property">+ Add a property</button>
+              <div id="journalPagePropertyPicker" class="journal-page-property-picker hidden" role="menu">
+                <button type="button" data-journal-prop="text"><span>Aa</span> Text</button>
+                <button type="button" data-journal-prop="mood"><span>😊</span> Mood</button>
+                <button type="button" data-journal-prop="tags"><span>#</span> Tags</button>
+                <button type="button" data-journal-prop="location"><span>📍</span> Location</button>
+              </div>
+            </div>
+          </div>
+          <div class="journal-page-comments">
+            <span class="journal-page-comments-label">Comments</span>
+            <div id="journalPageCommentsList" class="journal-page-comments-list"></div>
+            <button type="button" id="journalPageAddComment" class="journal-page-add-comment">+ Add a comment...</button>
+            <div id="journalPageCommentComposer" class="journal-page-comment-composer hidden">
+              <textarea id="journalPageCommentInput" placeholder="Write a comment..." rows="2"></textarea>
+              <div class="journal-page-comment-actions">
+                <button type="button" id="journalPageCommentCancel" class="journal-page-comment-cancel">Cancel</button>
+                <button type="button" id="journalPageCommentPost" class="journal-page-comment-post">Comment</button>
+              </div>
+            </div>
+          </div>
+          <textarea id="journalPageContent" class="journal-page-content" placeholder="Press Enter to continue with an empty page." rows="1"></textarea>
+        </div>
+        <footer class="journal-page-footer">
+          <button type="button" id="journalPageBack" class="journal-page-back">← Back to journal</button>
+          <div class="journal-page-footer-actions">
+            <button type="button" id="journalPageDelete" class="journal-page-delete hidden">Delete</button>
+            <button type="button" id="journalPageSave" class="journal-page-save">Done</button>
+          </div>
+        </footer>
+      </div>
+    </section>
+    <section id="rewards" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">CELEBRATE YOUR PROGRESS</p><h2>Reward Station 🎀</h2><p>Claim rewards you have earned from streak milestones and study sessions.</p></div></div><section class="reward-section"><h3>Today’s reward · <span id="rewardDateLabel"></span></h3><div id="rewardDaily" class="reward-list"></div></section><section class="reward-section"><h3>This week’s reward</h3><div id="rewardWeekly" class="reward-list"></div></section><section class="reward-section"><h3>Streak milestone rewards</h3><div id="rewardMilestones" class="reward-list"></div></section><section class="reward-section"><h3>Study break rewards</h3><div id="rewardBreaks" class="reward-list"></div></section></div></section>
+    <section id="settings" class="page"><div class="page-card"><div class="section-heading"><div><p class="eyebrow">PERSONALIZE</p><h2>Settings ⚙</h2><p>Make your planner feel like yours.</p></div></div><div class="settings-grid"><label>Planner name<input id="settingsName" type="text" placeholder="Lovely"></label><label>Focus message<textarea id="settingsFocus" placeholder="Be proud of how far you've come."></textarea></label><fieldset class="reward-settings"><legend>Streak rewards</legend><small>Customize what each milestone unlocks.</small><label>Basic reward<input id="rewardBasic" type="text"></label><label>Gold reward<input id="rewardGold" type="text"></label><label>Sapphire reward<input id="rewardSapphire" type="text"></label><label>Ruby reward<input id="rewardRuby" type="text"></label><label>Emerald reward<input id="rewardEmerald" type="text"></label><label>Amethyst reward<input id="rewardAmethyst" type="text"></label><label>Pearl reward<input id="rewardPearl" type="text"></label><label>Diamond reward<input id="rewardDiamond" type="text"></label></fieldset><button class="primary-button" id="saveSettings">Save Settings</button><div class="backup-controls"><button class="soft-button" id="exportData">Download backup</button><button class="soft-button" id="importData">Restore backup</button><input id="importFile" type="file" accept="application/json,.json" hidden><small>Your planner saves automatically in this browser. Use a backup to move it to another device.</small></div><button class="soft-button danger" id="clearData">Reset local planner data</button></div></div></section>
+  </main>
+</div>
+
+<div class="mobile-nav"><button class="active" data-page="dashboard">⌂<small>Home</small></button><button data-page="activities">✓<small>Tasks</small></button><button data-page="rewards">🎀<small>Rewards</small></button><button data-page="habits">🌼<small>Streak</small></button><button data-page="settings">🌸<small>Profile</small></button></div>
+<div id="modal" class="modal hidden"><div class="modal-box"><button id="closeModal" class="modal-close">×</button><div id="modalBody"></div></div></div>
+<div id="congratulations" class="congratulations hidden" role="status" aria-live="polite"><div class="congratulations-box"><div class="congratulations-ribbon">🎀</div><p class="eyebrow">REWARD CLAIMED</p><h2>Congratulations!</h2><p>You earned it.</p><strong id="congratulationsReward"></strong><button class="primary-button" onclick="document.querySelector('#congratulations').classList.add('hidden')">Enjoy reward</button></div></div>
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
