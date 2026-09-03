@@ -460,6 +460,78 @@ function renderRewardStation(data) {
   $("#rewardWeekly").innerHTML = weeklyCard;
   $("#rewardBreaks").innerHTML = breakCards;
 }
+function notificationItems(data) {
+  const items = [
+    ...data.routines
+      .filter((item) => item.done && item.date)
+      .map((item) => ({
+        date: item.date,
+        time: item.updated || 0,
+        icon: "✓",
+        kind: "Completed routine",
+        title: item.title,
+        description: item.description || "Routine completed",
+      })),
+    ...data.activities
+      .filter((item) => item.done && item.due)
+      .map((item) => ({
+        date: item.due,
+        time: item.updated || 0,
+        icon: "✓",
+        kind: "Completed task",
+        title: item.title,
+        description: item.description || `${item.type || "Task"} completed`,
+      })),
+    ...(data.streaks || [])
+      .filter((item) => item.active && item.requirementCount > 0 && item.date)
+      .map((item) => ({
+        date: item.date,
+        time: item.updated || 0,
+        icon: "🌼",
+        kind: "Achievement",
+        title: "Daily streak continued",
+        description: `${item.requirementCount} planner ${item.requirementCount === 1 ? "item" : "items"} completed`,
+      })),
+    ...(data.rewards || [])
+      .filter((item) => item.unlockedAt || item.claimedAt)
+      .map((item) => ({
+        date:
+          item.date ||
+          item.week ||
+          localDateKey(new Date(item.claimedAt || item.unlockedAt)),
+        time: item.claimedAt || item.unlockedAt || 0,
+        icon: item.claimed ? "🎀" : "🎁",
+        kind: item.claimed ? "Reward claimed" : "Reward unlocked",
+        title: item.title,
+        description: item.description || "A reward is ready for you",
+      })),
+  ];
+  return items
+    .filter((item) => item.date)
+    .sort((a, b) => `${b.date}-${b.time}`.localeCompare(`${a.date}-${a.time}`));
+}
+function renderNotifications(data) {
+  const items = notificationItems(data);
+  const groups = items.reduce((result, item) => {
+    (result[item.date] ||= []).push(item);
+    return result;
+  }, {});
+  const content = Object.entries(groups)
+    .map(
+      ([date, entries]) =>
+        `<section class="notification-group"><h3>${esc(fmt(date))}</h3><div class="notification-list">${entries
+          .map(
+            (item) =>
+              `<article class="notification-item"><span class="notification-item-icon">${item.icon}</span><div><strong>${esc(item.title)}</strong><small>${esc(item.kind)} · ${esc(item.description)}</small></div></article>`,
+          )
+          .join("")}</div></section>`,
+    )
+    .join("");
+  $("#modalBody").innerHTML = `<div class="notification-header"><div><p class="eyebrow">YOUR ACTIVITY</p><h2>Notifications</h2><p>Achievements, rewards, and completed work, organized by date.</p></div><span class="notification-count">${items.length}</span></div>${content || '<div class="empty">Complete a task or claim a reward to see it here ♡</div>'}`;
+  $("#modal").classList.add("notification-open");
+  $("#modal").classList.remove("hidden");
+  $(".modal-box").classList.add("notification-modal");
+}
 function showCongratulations(reward) {
   const overlay = $("#congratulations");
   if (!overlay) return;
@@ -947,6 +1019,7 @@ function fileData(file) {
   });
 }
 function closeModal() {
+  $("#modal").classList.remove("notification-open");
   $("#modal").classList.add("hidden");
   $("#modalBody").innerHTML = "";
 }
@@ -1201,7 +1274,9 @@ $("#clearData").onclick = async () => {
   toast("Planner reset");
   location.reload();
 };
-$("#notificationButton").onclick = () => toast("No new notifications ♡");
+$("#notificationButton").onclick = async () => {
+  renderNotifications(await readData());
+};
 $("#journalSearch").oninput = (e) => {
   journalSearch = e.target.value;
   renderJournal(window.__data);
@@ -1278,7 +1353,6 @@ $("#importFile").onchange = (e) => {
   importData(e.target.files[0]);
   e.target.value = "";
 };
-$("#notificationButton").onclick = () => toast("No new notifications ♡");
 (async () => {
   try {
     await openDB();
