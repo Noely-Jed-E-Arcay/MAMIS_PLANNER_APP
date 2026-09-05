@@ -1265,7 +1265,7 @@ async function addJournalPageImages(files) {
       toast(`${file.name} is larger than 10 MB`);
       continue;
     }
-    journalPageImages.push({ id: uid(), name: file.name, data: await fileData(file) });
+    journalPageImages.push({ id: uid(), name: file.name, data: await imageData(file) });
   }
   renderJournalPageImages();
 }
@@ -1444,7 +1444,7 @@ function form(type, x = {}) {
         o.fileData = fileContents;
         o.fileName = f.name;
         o.fileType = f.type;
-        o.image = f.type.startsWith("image/") ? fileContents : x.image || "";
+        o.image = f.type.startsWith("image/") ? await imageData(f) : x.image || "";
       } else {
         o.image = x.image || "";
         o.fileData = x.fileData || "";
@@ -1475,6 +1475,26 @@ function fileData(file) {
     r.onload = () => res(r.result);
     r.onerror = rej;
     r.readAsDataURL(file);
+  });
+}
+function imageData(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const scale = Math.min(1, 1600 / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      image.onerror = reject;
+      image.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
   });
 }
 function closeModal() {
@@ -1796,14 +1816,14 @@ $("#avatarSelect").onchange = (e) => {
 $("#profileImageFile").onchange = async () => {
   const file = $("#profileImageFile").files[0];
   if (!file) return;
-  window.__profileImage = await fileData(file);
+  window.__profileImage = await imageData(file);
   renderProfile({ profileImage: window.__profileImage, avatar: $("#avatarSelect").value, bannerImage: window.__bannerImage });
   await saveSettingPatch({ profileImage: window.__profileImage });
 };
 $("#bannerImageFile").onchange = async () => {
   const file = $("#bannerImageFile").files[0];
   if (!file) return;
-  window.__bannerImage = await fileData(file);
+  window.__bannerImage = await imageData(file);
   renderProfile({ profileImage: window.__profileImage, avatar: $("#avatarSelect").value, bannerImage: window.__bannerImage });
   await saveSettingPatch({ bannerImage: window.__bannerImage });
 };

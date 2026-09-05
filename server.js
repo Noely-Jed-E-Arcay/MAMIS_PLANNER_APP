@@ -31,7 +31,7 @@ function resolveDataDirectory() {
 
 const DATA_DIR = resolveDataDirectory();
 const DATA_FILE = path.join(DATA_DIR, "server-db.json");
-const MAX_BODY = 15 * 1024 * 1024;
+const MAX_BODY = 50 * 1024 * 1024;
 const SESSION_SECRET_FILE = path.join(DATA_DIR, ".session-secret");
 const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 const SUPABASE_URL = (process.env.SUPABASE_URL || "")
