@@ -173,7 +173,11 @@ async function apiRequest(pathname, options = {}) {
   if (activeAccount?.token) headers.authorization = `Bearer ${activeAccount.token}`;
   const response = await fetch(apiUrl(pathname), { ...options, headers });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || "The planner server is unavailable.");
+  if (!response.ok) {
+    const error = new Error(body.error || `Planner server returned HTTP ${response.status}.`);
+    error.status = response.status;
+    throw error;
+  }
   return body;
 }
 function scheduleRemoteSync() {
@@ -184,9 +188,14 @@ function scheduleRemoteSync() {
 async function syncRemotePlanner() {
   if (!remoteAuthEnabled || !activeAccount?.token || remoteHydrating) return;
   try {
-    await apiRequest("/api/planner", { method: "PUT", body: JSON.stringify({ data: await readData() }) });
-  } catch {
-    toast("Could not sync planner changes.");
+    const payload = JSON.stringify({ data: await readData() });
+    if (payload.length > 45 * 1024 * 1024) {
+      toast("Could not sync: planner media is larger than 45 MB.");
+      return;
+    }
+    await apiRequest("/api/planner", { method: "PUT", body: payload });
+  } catch (error) {
+    toast(`Could not sync planner changes${error.status ? ` (HTTP ${error.status})` : ""}: ${error.message}`);
   }
 }
 async function loadRemotePlanner() {
