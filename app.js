@@ -1,8 +1,9 @@
 const DB_NAME = "LovelyDayPlannerDB",
-  DB_VERSION = 5;
+  DB_VERSION = 7;
 const stores = [
   "routines",
   "school",
+  "events",
   "activities",
   "notes",
   "goals",
@@ -14,8 +15,8 @@ const stores = [
   "streaks",
   "rewards",
   "notifications",
+  "studyTimers",
 ];
-const MAX_TASKS = 5;
 const DEFAULT_REWARDS = {
   Basic: "Choose a small treat",
   Gold: "Watch a movie",
@@ -36,7 +37,22 @@ const STREAK_LEVELS = [
   { name: "Pearl", goal: 13 },
   { name: "Diamond", goal: 15 },
 ];
-const studyTimer = JSON.parse(localStorage.getItem("LovelyDayPlannerStudyTimer") || "null") || {
+const PHILIPPINES_SPECIAL_DAYS = {
+  "01-01": { name: "New Year's Day", description: "A national holiday welcoming the new year." },
+  "02-24": { name: "People Power Anniversary", description: "A special non-working day commemorating the People Power Revolution." },
+  "04-09": { name: "Araw ng Kagitingan", description: "Day of Valor, honoring Filipino and American soldiers who served in World War II." },
+  "05-01": { name: "Labor Day", description: "A national holiday honoring Filipino workers." },
+  "06-12": { name: "Independence Day", description: "The Philippines celebrates its declaration of independence." },
+  "08-21": { name: "Ninoy Aquino Day", description: "A special non-working day remembering Benigno ‘Ninoy’ Aquino Jr." },
+  "08-26": { name: "National Heroes Day", description: "A national holiday honoring the country’s heroes." },
+  "11-01": { name: "All Saints’ Day", description: "Families remember and honor the saints and loved ones who have passed away." },
+  "11-30": { name: "Bonifacio Day", description: "A national holiday honoring revolutionary leader Andres Bonifacio." },
+  "12-08": { name: "Feast of the Immaculate Conception", description: "A special non-working day observed by many Filipino Catholics." },
+  "12-25": { name: "Christmas Day", description: "A national holiday celebrating Christmas." },
+  "12-30": { name: "Rizal Day", description: "A national holiday commemorating Dr. Jose Rizal." },
+  "12-31": { name: "Last Day of the Year", description: "A special non-working day for year-end preparations and celebrations." },
+};
+let studyTimer = {
   routineId: "",
   durationMinutes: 0,
   remaining: 0,
@@ -56,12 +72,32 @@ const remoteAuthEnabled = location.protocol !== "file:";
 function localDateKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
-let currentDate = localDateKey();
+function philippinesDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+function todayLabel(date = currentDate) {
+  const today = philippinesDateKey();
+  const label = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric", timeZone: "Asia/Manila" }).format(new Date(`${date}T12:00:00`));
+  if (date === today) return `Today, ${label}`;
+  if (date === dateShift(today, -1)) return `Yesterday, ${label}`;
+  if (date === dateShift(today, 1)) return `Tomorrow, ${label}`;
+  const diff = Math.round((new Date(`${date}T12:00:00`) - new Date(`${today}T12:00:00`)) / 86400000);
+  return diff > 0 ? `${diff} days left, ${label}` : `${Math.abs(diff)} days ago, ${label}`;
+}
+let currentDate = philippinesDateKey();
 let viewMonth = new Date(currentDate + "T12:00:00");
 let journalSearch = "";
 let activeJournalEntry = null;
 let journalPageProperties = [];
 let journalPageComments = [];
+let journalPageImages = [];
+let journalImageRotationTimer;
+window.__soundSettings = { timer: "timer", alert: "reminder" };
 const JOURNAL_PROPERTY_TYPES = {
   text: { name: "Text", icon: "Aa" },
   mood: { name: "Mood", icon: "😊" },
@@ -179,6 +215,15 @@ function ensureAudioContext() {
 }
 function playSound(type = "achievement") {
   try {
+    const selectedTone = type === "timer" ? window.__soundSettings.timer : window.__soundSettings.alert;
+    if (selectedTone === "off") return;
+    const customSound = type === "timer" ? window.__soundSettings.timerFile : window.__soundSettings.alertFile;
+    if (customSound) {
+      const audio = new Audio(customSound);
+      audio.volume = 0.7;
+      audio.play().catch(() => {});
+      return;
+    }
     const ctx = ensureAudioContext();
     if (!ctx) return;
     if (ctx.state === "suspended") ctx.resume().catch(() => {});
@@ -188,6 +233,8 @@ function playSound(type = "achievement") {
       timer: { frequencies: [740, 640, 520], type: "square", duration: 0.28, volume: 0.38, repeats: 8, gap: 0.12 },
       reminder: { frequencies: [620, 770, 980], type: "sawtooth", duration: 0.32, volume: 0.4, repeats: 10, gap: 0.16 },
     }[type] || { frequencies: [523, 698], type: "triangle", duration: 0.18, volume: 0.18, repeats: 1, gap: 0.08 };
+    if (selectedTone === "soft") Object.assign(preset, { frequencies: [523, 659], type: "sine", repeats: 1, volume: 0.16 });
+    if (selectedTone === "bright") Object.assign(preset, { frequencies: [659, 784, 988], type: "triangle", repeats: 2, volume: 0.2 });
     for (let repeat = 0; repeat < preset.repeats; repeat++) {
       const start = ctx.currentTime + repeat * (preset.duration + preset.gap);
       const oscillator = ctx.createOscillator();
@@ -206,6 +253,38 @@ function playSound(type = "achievement") {
     // Audio is optional and must never interrupt planner actions.
   }
 }
+function specialDayFor(date) {
+  return PHILIPPINES_SPECIAL_DAYS[date.slice(5)] || null;
+}
+function eventDaysForMonth(data) {
+  const holidayDates = new Set(), eventDates = new Set(), eventStickers = new Map();
+  for (let day = 1; day <= 31; day++) {
+    const date = `${viewMonth.getFullYear()}-${String(viewMonth.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (specialDayFor(date)) holidayDates.add(date);
+  }
+  (data.events || []).forEach((event) => {
+    eventDates.add(event.date);
+    if (!eventStickers.has(event.date)) eventStickers.set(event.date, event.icon || "🎉");
+  });
+  return { holidayDates, eventDates, eventStickers };
+}
+function renderSpecialDay(data) {
+  const specialDay = specialDayFor(currentDate);
+  const customEvents = [
+    ...(data.events || []).filter((item) => item.date === currentDate).map((item) => item.title),
+    ...data.school.filter((item) => item.date === currentDate).map((item) => item.subject),
+    ...data.routines.filter((item) => item.date === currentDate).map((item) => item.title),
+    ...data.activities.filter((item) => item.due === currentDate).map((item) => item.title),
+  ];
+  const notice = $("#specialDayNotice");
+  if (!notice) return;
+  notice.innerHTML = specialDay
+    ? `<strong>${esc(fmt(currentDate))} · ${esc(specialDay.name)}</strong><small>${esc(specialDay.description)} <b>Holiday</b></small>${customEvents.length ? `<small>Events: ${esc(customEvents.join(" · "))}</small>` : ""}<button class="small-button" data-add="event">＋ Add event</button>`
+    : customEvents.length
+      ? `<strong>${esc(fmt(currentDate))}</strong><small>${customEvents.length} event${customEvents.length === 1 ? "" : "s"}: ${esc(customEvents.join(" · "))}</small><button class="small-button" data-add="event">＋ Add event</button>`
+      : `<strong>${esc(fmt(currentDate))}</strong><small>No Philippine holiday or special event recorded for this date.</small><button class="small-button" data-add="event">＋ Add event</button>`;
+  notice.classList.toggle("holiday", Boolean(specialDay));
+}
 function triggerSoundOnUserInteraction() {
   ensureAudioContext();
 }
@@ -213,13 +292,19 @@ async function checkReminderAlerts() {
   try {
     const data = await readData();
     const now = Date.now();
-    for (const reminder of (data.reminders || []).filter((item) => item.date && item.time && !item.notifiedAt)) {
-      const when = new Date(`${reminder.date}T${reminder.time}:00`).getTime();
-      if (when <= now) {
+    const alertable = [
+      ...(data.reminders || []).map((item) => ({ item, store: "reminders", date: item.date, time: item.time })),
+      ...(data.routines || []).map((item) => ({ item, store: "routines", date: item.date, time: item.time })),
+      ...(data.activities || []).map((item) => ({ item, store: "activities", date: item.due, time: item.time })),
+    ];
+    for (const entry of alertable.filter(({ item, date, time }) => date && time && !item.notifiedAt)) {
+      const when = new Date(`${entry.date}T${entry.time}:00`).getTime();
+      const newlyCreated = entry.item.createdAt && now - entry.item.createdAt < 30 * 60 * 1000;
+      if (!newlyCreated && when > now && when - now <= 30 * 60 * 1000) {
         playSound("reminder");
-        reminder.notifiedAt = now;
-        await put("reminders", reminder);
-        toast(`Reminder: ${reminder.title} 🔔`, true);
+        entry.item.notifiedAt = now;
+        await put(entry.store, entry.item);
+        toast(`Due in 30 minutes: ${entry.item.title} 🔔`, true);
       }
     }
   } catch (error) {
@@ -302,7 +387,29 @@ async function initializeAccount() {
 }
 function showPlanner() {
   $("#authScreen").classList.add("hidden");
-  $("#accountEmail").textContent = activeAccount?.email || "Guest mode";
+  $("#accountEmail").textContent = activeAccount?.name || "Guest mode";
+  $("#accountButton").title = activeAccount?.email ? `Signed in as ${activeAccount.email}. Sign out` : "Sign out";
+}
+async function applyTheme(theme = "light", persist = false) {
+  document.body.dataset.theme = theme;
+  if ($("#themeSelect")) $("#themeSelect").value = theme;
+  if (persist) {
+    localStorage.setItem("LovelyDayPlannerTheme", theme);
+    await saveSettingPatch({ theme });
+  }
+}
+async function saveSettingPatch(patch) {
+  if (!db) return;
+  const settings = (await all("settings")).find((item) => item.id === "main") || { id: "main" };
+  await put("settings", { ...settings, ...patch, id: "main" });
+}
+function renderProfile(settings) {
+  $("#avatarIcon").textContent = settings.avatar || "🌸";
+  $("#profileImage").src = settings.profileImage || "";
+  $("#profileImage").classList.toggle("hidden", !settings.profileImage);
+  $("#avatarIcon").classList.toggle("hidden", Boolean(settings.profileImage));
+  $("#bannerImage").src = settings.bannerImage || "";
+  $("#bannerImage").classList.toggle("hidden", !settings.bannerImage);
 }
 async function removeWebDevelopmentSchedule() {
   for (const item of await all("school"))
@@ -337,8 +444,6 @@ async function readData() {
   return Object.fromEntries(stores.map((s, i) => [s, vals[i]]));
 }
 function show(page) {
-  $("#mobileMoreMenu")?.classList.add("hidden");
-  $("[data-mobile-more]")?.setAttribute("aria-expanded", "false");
   $$(".page").forEach((x) => x.classList.toggle("active", x.id === page));
   const nextPage = $(`#${CSS.escape(page)}`);
   nextPage?.classList.remove("page-enter");
@@ -379,7 +484,7 @@ function monthCells(date) {
   const count = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
   return { start, count };
 }
-function calendarHTML(date, selected, items) {
+function calendarHTML(date, selected, items, holidayDates = new Set(), eventDates = new Set(), today = philippinesDateKey(), eventStickers = new Map(), dayStats = new Map()) {
   const { start, count } = monthCells(date);
   const prevCount = new Date(date.getFullYear(), date.getMonth(), 0).getDate();
   let h = "";
@@ -399,7 +504,10 @@ function calendarHTML(date, selected, items) {
     } else real = new Date(date.getFullYear(), date.getMonth(), day);
     const ds = localDateKey(real);
     const has = items.has(ds);
-    h += `<span class="${muted ? "muted " : ""}${ds === selected ? "selected " : ""}${has ? "has-item" : ""}" data-calendar-date="${ds}">${day}</span>`;
+    const sticker = eventStickers.get(ds);
+    const stats = dayStats.get(ds);
+    const statsLabel = stats ? `${stats.completed}/${stats.total} completed tasks/schedules` : "No tasks or schedules";
+    h += `<span class="${muted ? "muted " : ""}${ds === selected ? "selected " : ""}${ds === today ? "today-date " : ""}${has ? "has-item " : ""}${holidayDates.has(ds) ? "holiday-date " : ""}${eventDates.has(ds) ? "event-date" : ""}" data-calendar-date="${ds}" title="${esc(specialDayFor(ds)?.name || (eventDates.has(ds) ? "Planner event" : ""))} · ${esc(statsLabel)}">${sticker ? `<i class="calendar-sticker" aria-hidden="true">${esc(sticker)}</i>` : ""}${day}${stats?.total ? `<small class="calendar-count" aria-hidden="true">${stats.completed}/${stats.total}</small>` : ""}</span>`;
   }
   return h;
 }
@@ -411,8 +519,21 @@ function getActivityStudyMinutes(data) {
     .filter((x) => x.date === currentDate && x.category === "study")
     .reduce((n, x) => n + (Number(x.minutes) || 45), 0);
 }
+async function loadStudyTimer() {
+  const saved = (await all("studyTimers")).find((item) => item.id === "main");
+  if (saved) {
+    studyTimer = { ...studyTimer, ...saved, running: false };
+    return;
+  }
+  const legacy = JSON.parse(localStorage.getItem("LovelyDayPlannerStudyTimer") || "null");
+  if (legacy) {
+    studyTimer = { ...studyTimer, ...legacy, running: false };
+    await put("studyTimers", { id: "main", ...studyTimer });
+    localStorage.removeItem("LovelyDayPlannerStudyTimer");
+  }
+}
 function saveStudyTimer() {
-  localStorage.setItem("LovelyDayPlannerStudyTimer", JSON.stringify(studyTimer));
+  if (db) put("studyTimers", { id: "main", ...studyTimer });
 }
 function formatTimer(seconds) {
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
@@ -545,13 +666,23 @@ async function syncStreak(date, data) {
     await del("rewards", `daily-${date}`);
   }
 }
-function streakDays(data) {
+function streakDays(data, baseDate = currentDate) {
   const dates = completedDates(data);
-  let d = currentDate,
+  let d = baseDate,
     count = 0;
   while (dates.has(d)) {
     count++;
     d = dateShift(d, -1);
+  }
+  return count;
+}
+function streakDaysBeforeToday(data, baseDate = currentDate) {
+  const dates = completedDates(data);
+  let date = dateShift(baseDate, -1);
+  let count = 0;
+  while (dates.has(date)) {
+    count++;
+    date = dateShift(date, -1);
   }
   return count;
 }
@@ -560,21 +691,35 @@ function renderMonth(data) {
   data.routines.forEach((x) => itemDates.add(x.date));
   data.school.forEach((x) => itemDates.add(x.date));
   data.activities.forEach((x) => itemDates.add(x.due));
+  (data.events || []).forEach((x) => itemDates.add(x.date));
+  const { holidayDates, eventDates, eventStickers } = eventDaysForMonth(data);
+  const dayStats = new Map();
+  [...data.routines, ...data.activities.map((item) => ({ ...item, date: item.due }))].forEach((item) => {
+    const stats = dayStats.get(item.date) || { total: 0, completed: 0 };
+    stats.total += 1;
+    if (item.done) stats.completed += 1;
+    dayStats.set(item.date, stats);
+  });
   $("#monthLabel").textContent = viewMonth.toLocaleDateString("en-US", {
     month: "long",
     year: "numeric",
   });
-  $("#monthGrid").innerHTML = calendarHTML(viewMonth, currentDate, itemDates);
+  const today = philippinesDateKey();
+  $("#monthGrid").innerHTML = calendarHTML(viewMonth, currentDate, itemDates, holidayDates, eventDates, today, eventStickers, dayStats);
   $("#largeCalendar").innerHTML =
-    `<div class="large-month-head"><button class="soft-button" id="largePrev">‹</button><h3>${viewMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</h3><button class="soft-button" id="largeNext">›</button></div><div class="weekdays"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div><div class="large-month-grid">${calendarHTML(viewMonth, currentDate, itemDates).replaceAll("<span ", "<div ").replaceAll("</span>", "</div>")}</div>`;
+    `<div class="large-month-head"><button class="soft-button" id="largePrev">‹</button><h3>${viewMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</h3><button class="soft-button" id="largeNext">›</button></div><div class="weekdays"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div><div class="large-month-grid">${calendarHTML(viewMonth, currentDate, itemDates, holidayDates, eventDates, today, eventStickers, dayStats).replaceAll("<span ", "<div ").replaceAll("</span>", "</div>")}</div>`;
 }
 function renderStreak(data) {
-  const streak = streakDays(data),
-    dates = completedDates(data);
+  const today = philippinesDateKey();
+  const selectedDate = currentDate;
+  $("#streakTodayLabel").textContent = todayLabel(selectedDate);
+  const dates = completedDates(data);
+  const activeToday = dates.has(selectedDate);
+  const streak = activeToday ? streakDays(data, selectedDate) : streakDaysBeforeToday(data, selectedDate);
   const completedTotal =
     data.routines.filter((x) => x.done).length +
     data.activities.filter((x) => x.done).length;
-  const completedToday = completedRequirementCount(data, currentDate);
+  const completedToday = completedRequirementCount(data, selectedDate);
   const rewards = {
     ...DEFAULT_REWARDS,
     ...(data.settings.find((x) => x.id === "main")?.rewards || {}),
@@ -582,15 +727,15 @@ function renderStreak(data) {
   const settings = data.settings.find((x) => x.id === "main") || { id: "main" };
   const currentLevel = [...STREAK_LEVELS]
     .reverse()
-    .find((level) => completedTotal >= level.goal);
-  const nextLevel = STREAK_LEVELS.find((level) => completedTotal < level.goal);
+    .find((level) => completedToday >= level.goal);
+  const nextLevel = STREAK_LEVELS.find((level) => completedToday < level.goal);
   const progressStart = currentLevel?.goal || 0;
   const progressEnd = nextLevel?.goal || progressStart + 1;
   const levelProgress = nextLevel
     ? Math.min(
         100,
         Math.round(
-          ((completedTotal - progressStart) / (progressEnd - progressStart)) *
+          ((completedToday - progressStart) / (progressEnd - progressStart)) *
             100,
         ),
       )
@@ -604,18 +749,18 @@ function renderStreak(data) {
     item.classList.toggle("current", item.dataset.level === currentLevel?.name);
   });
   $("#streakNextLevel").textContent = nextLevel
-    ? `${Math.max(0, nextLevel.goal - completedTotal)} more completed to reach ${nextLevel.name}`
+    ? `${Math.max(0, nextLevel.goal - completedToday)} more completed to reach ${nextLevel.name}`
     : "Highest milestone reached";
   $("#streakReward").textContent = completedToday
     ? "Reward: Take a relaxing break"
     : "Complete a task today to unlock your reward";
-  if (currentLevel && currentLevel.goal > (Number(settings.rewardAlertLevel) || 0)) {
+  if (selectedDate === today && currentLevel && (settings.rewardAlertDate !== today || currentLevel.goal > (Number(settings.rewardAlertLevel) || 0))) {
     playSound("streak");
     toast(`🎀 ${currentLevel.name} unlocked! Claim your reward: ${rewards[currentLevel.name]}`);
-    put("settings", { ...settings, rewardAlertLevel: currentLevel.goal });
+    put("settings", { ...settings, rewardAlertDate: today, rewardAlertLevel: currentLevel.goal });
   }
   const days = [];
-  const base = new Date(currentDate + "T12:00:00");
+  const base = new Date(selectedDate + "T12:00:00");
   base.setDate(base.getDate() - 6);
   for (let i = 0; i < 7; i++) {
     const d = new Date(base);
@@ -623,17 +768,24 @@ function renderStreak(data) {
     const ds = localDateKey(d);
     const completed = dates.has(ds);
     days.push(
-      `<div class="day-chip ${ds === currentDate ? "today" : ""} ${completed ? "active" : ""}"><span>${d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 2)}</span><div class="day-circle">${completed ? "🔥" : d.getDate()}</div></div>`,
+      `<div class="day-chip ${ds === selectedDate ? "today" : ""} ${completed ? "active" : ""}"><span>${d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 2)}</span><div class="day-circle">${completed ? "🔥" : d.getDate()}</div></div>`,
     );
   }
   $("#streakWeek").innerHTML = days.join("");
   $("#streakCountLabel").textContent = `${streak} day`;
-  $("#streakQuestions").textContent = dates.has(currentDate)
+  $("#streakQuestions").textContent = activeToday
     ? "Streak active"
-    : "Complete a task to start";
+    : streak
+      ? `${streak} day streak · Not activated today`
+      : "Complete a task to start";
+  $("#streakReward").textContent = activeToday
+    ? "Reward: Take a relaxing break"
+    : streak
+      ? "Your streak is waiting for today’s task"
+      : "Complete a task today to unlock your reward";
 }
 function renderRewardStation(data) {
-  const completedTotal = data.routines.filter((x) => x.done).length + data.activities.filter((x) => x.done).length;
+  const completedTotal = completedRequirementCount(data, currentDate);
   const rewards = { ...DEFAULT_REWARDS, ...(data.settings.find((x) => x.id === "main")?.rewards || {}) };
   const rewardRecords = data.rewards || [];
   const claimed = new Set(rewardRecords.filter((x) => x.claimed).map((x) => x.id));
@@ -727,6 +879,27 @@ function renderNotifications(data) {
   $("#modal").classList.remove("hidden");
   $(".modal-box").classList.add("notification-modal");
 }
+async function syncDeckProgress(data) {
+  const completionRate = (items) => {
+    const total = items.length;
+    return total ? Math.round((items.filter((item) => item.done).length / total) * 100) : 0;
+  };
+  const today = philippinesDateKey();
+  const recentDates = new Set();
+  for (let offset = 0; offset < 7; offset++) recentDates.add(dateShift(today, -offset));
+  const completedDatesThisWeek = [...completedDates(data)].filter((date) => recentDates.has(date)).length;
+  const studyRoutines = data.routines.filter((item) => item.category === "study");
+  const settings = data.settings.find((item) => item.id === "main") || {};
+  const profileFields = [settings.name, settings.avatar, settings.profileImage, settings.bannerImage].filter(Boolean).length;
+  const decks = [
+    { id: "school", name: "School", progress: completionRate([...data.routines, ...data.activities]), icon: "🏠" },
+    { id: "streak", name: "Streak", progress: Math.round((completedDatesThisWeek / 7) * 100), icon: "🌼" },
+    { id: "study", name: "Study", progress: completionRate(studyRoutines), icon: "📁" },
+    { id: "profile", name: "Profile", progress: Math.round((profileFields / 4) * 100), icon: "🌸" },
+  ];
+  data.decks = decks;
+  await Promise.all(decks.map((deck) => put("decks", { ...deck, updated: Date.now() })));
+}
 function showCongratulations(reward) {
   const overlay = $("#congratulations");
   if (!overlay) return;
@@ -745,7 +918,7 @@ async function claimReward(id) {
     const levelName = id.replace("level-", "");
     const level = STREAK_LEVELS.find((x) => x.name === levelName);
     const data = await readData();
-    const completedTotal = data.routines.filter((x) => x.done).length + data.activities.filter((x) => x.done).length;
+    const completedTotal = completedRequirementCount(data, currentDate);
     const rewards = { ...DEFAULT_REWARDS, ...(data.settings.find((x) => x.id === "main")?.rewards || {}) };
     if (!level || completedTotal < level.goal) return;
     reward = { id, type: "milestone", title: `${level.name} reward`, description: rewards[level.name], unlockedAt: Date.now(), claimed: false };
@@ -764,6 +937,7 @@ function renderDashboard(data) {
   const routines = data.routines.filter((x) => x.date === currentDate),
     school = data.school.filter((x) => x.date === currentDate),
     acts = data.activities.filter((x) => x.due === currentDate);
+  $("#dashboardDateLabel").textContent = todayLabel(currentDate);
   const done =
       routines.filter((x) => x.done).length + acts.filter((x) => x.done).length,
     total = routines.length + acts.length;
@@ -771,32 +945,38 @@ function renderDashboard(data) {
   $("#taskProgress").style.width = progressPercent(done, total) + "%";
   $("#studyStat").textContent =
     `${Math.floor(getActivityStudyMinutes(data) / 60)}h ${String(getActivityStudyMinutes(data) % 60).padStart(2, "0")}m`;
-  $("#upcomingStat").textContent = `${school.length + acts.length} Events`;
+  const upcoming = [
+    ...Object.entries(PHILIPPINES_SPECIAL_DAYS).map(([monthDay, item]) => ({ date: `${currentDate.slice(0, 4)}-${monthDay}`, ...item, holiday: true })),
+    ...(data.events || []).map((item) => ({ ...item, name: item.title })),
+    ...school.map((item) => ({ date: item.date, name: item.subject, description: `${item.start || ""}–${item.end || ""}`, holiday: false })),
+    ...acts.map((item) => ({ date: item.due, name: item.title, description: item.description, holiday: false })),
+  ].filter((item) => item.date >= currentDate).sort((a, b) => a.date.localeCompare(b.date));
+  const nextEvent = upcoming[0];
+  $("#upcomingStat").textContent = nextEvent ? `${nextEvent.name} · ${nextEvent.date === currentDate ? "Today" : nextEvent.date}` : "No upcoming events";
+  $("#upcomingCard").dataset.eventDate = nextEvent?.date || "";
   $("#focusText").textContent =
     window.plannerFocus || "Be proud of how far you've come.";
   const events = [
+    ...(data.events || []).filter((x) => x.date === currentDate).map((x) => ({ time: "", title: `${x.icon || "🎉"} ${x.title}`, meta: x.description || "Planner event", color: x.color || "", delete: `data-del-e="${x.id}"`, edit: `data-edit-e="${x.id}"`, toggle: `data-toggle-e="${x.id}"`, done: false })),
     ...routines.map((x) => ({
       time: x.time,
       title: x.title,
       meta: `${x.endTime ? `${formatTime(x.time)}–${formatTime(x.endTime)} · ` : ""}${x.description || ""}`,
       done: x.done,
-      color:
-        x.category === "study"
-          ? "lavender"
-          : x.category === "break"
-            ? "peach"
-            : "",
+      color: x.color || (x.category === "study" ? "lavender" : x.category === "break" ? "peach" : ""),
       toggle: `data-toggle-r="${x.id}"`,
       edit: `data-edit-r="${x.id}"`,
+      delete: `data-del-r="${x.id}"`,
     })),
     ...acts.map((x) => ({
       time: x.startTime || x.time,
       title: x.title,
       meta: `${x.startTime && x.time ? `${formatTime(x.startTime)}–${formatTime(x.time)} · ` : ""}${x.type || "Task"}${x.description ? " · " + x.description : ""}`,
       done: x.done,
-      color: "peach",
+      color: x.color || "peach",
       toggle: `data-toggle-a="${x.id}"`,
       edit: `data-edit-a="${x.id}"`,
+      delete: `data-del-a="${x.id}"`,
     })),
     ...school.map((x) => ({
       time: x.start,
@@ -810,7 +990,7 @@ function renderDashboard(data) {
     ? events
         .map(
           (x) =>
-            `<div class="event"><div class="time">${esc(formatTime(x.time))}</div><div class="eventbox ${x.color}"><div><b>${esc(x.title)}</b><small>${esc(x.meta || "")}</small></div>${x.toggle ? `<div class="actions"><button class="dot ${x.done ? "done" : ""}" ${x.toggle} title="${x.done ? "Uncheck" : "Complete"}">${x.done ? "✓" : ""}</button><button class="small-button" ${x.edit} title="Edit schedule">Edit</button></div>` : '<span class="dot"></span>'}</div></div>`,
+            `<div class="event"><div class="time">${esc(formatTime(x.time))}</div><div class="eventbox ${x.color}" style="--item-color:${esc(x.color || "pink")}"><div><b>${esc(x.title)}</b><small>${esc(x.meta || "")}</small></div>${x.toggle ? `<div class="actions"><button class="dot ${x.done ? "done" : ""}" ${x.toggle} title="${x.done ? "Uncheck" : "Complete"}">${x.done ? "✓" : ""}</button><button class="small-button" ${x.edit} title="Edit item">Edit</button><button class="small-button" ${x.delete} title="Delete item">Delete</button></div>` : '<span class="dot"></span>'}</div></div>`,
         )
         .join("")
     : `<div class="empty">Nothing planned yet. Add a routine or class 🌷</div>`;
@@ -825,11 +1005,6 @@ function renderDashboard(data) {
         )
         .join("")
     : `<div class="empty">Add a task to jump back in ♡</div>`;
-  const allTasks = [...data.activities]
-    .sort((a, b) => `${a.due}-${a.time || "23:59"}`.localeCompare(`${b.due}-${b.time || "23:59"}`));
-  $("#dashboardTaskList").innerHTML = allTasks.length
-    ? allTasks.map((task) => `<article class="dashboard-task ${task.done ? "completed" : ""}"><div><strong>${esc(task.title)}</strong><small>${esc(fmt(task.due))} · ${task.startTime ? `${esc(formatTime(task.startTime))}–` : ""}${task.time ? esc(formatTime(task.time)) : "No due time"}</small></div><button class="small-button" data-toggle-a="${esc(task.id)}">${task.done ? "Undo" : "Done"}</button></article>`).join("")
-    : `<div class="empty">No tasks saved yet. Add your first task ✨</div>`;
   const decks = data.decks.length
     ? data.decks
     : [
@@ -846,7 +1021,47 @@ function renderDashboard(data) {
     .join("");
   renderStreak(data);
   renderMonth(data);
+  renderSpecialDay(data);
   renderStudyTimer(data);
+}
+function renderUpcomingEvents(data) {
+  const year = Number(currentDate.slice(0, 4));
+  const entries = [
+    ...Object.entries(PHILIPPINES_SPECIAL_DAYS).map(([monthDay, item]) => ({ date: `${year}-${monthDay}`, title: item.name, description: item.description, type: "Philippines holiday", icon: "🇵🇭", holiday: true })),
+    ...(data.events || []).map((item) => ({ date: item.date, title: item.title, description: item.description || "Personal event", type: "Personal event", icon: item.icon || "🎉" })),
+    ...data.routines.map((item) => ({ date: item.date, title: item.title, description: item.description || "Schedule", type: "Schedule", icon: "🗓️" })),
+    ...data.activities.map((item) => ({ date: item.due, title: item.title, description: item.description || item.type || "Task", type: "Task", icon: "✓" })),
+    ...data.school.map((item) => ({ date: item.date, title: item.subject, description: item.room || "Class", type: "Class", icon: "📚" })),
+  ].filter((item) => item.date >= currentDate).sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
+  const groups = entries.reduce((result, item) => {
+    const key = item.date.slice(0, 7);
+    (result[key] ||= []).push(item);
+    return result;
+  }, {});
+  const content = Object.entries(groups).map(([month, items]) => `<section class="upcoming-month"><h3>${esc(new Date(`${month}-01T12:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" }))}</h3><div class="upcoming-list">${items.map((item) => `<article class="upcoming-item ${item.holiday ? "holiday" : ""}"><span>${item.icon}</span><div><strong>${esc(item.title)}</strong><small>${esc(fmt(item.date))} · ${esc(item.type)}</small><p>${esc(item.description)}</p></div></article>`).join("")}</div></section>`).join("");
+  $("#modalBody").innerHTML = `<div class="upcoming-modal"><div class="notification-header"><div><p class="eyebrow">PLAN AHEAD</p><h2>Upcoming events</h2><p>Holidays, schedules, tasks, classes, and your personal events.</p></div><span class="notification-count">${entries.length}</span></div>${content || '<div class="empty">No upcoming events yet.</div>'}</div>`;
+  $("#modal").classList.remove("hidden");
+}
+function ensureSoundSettings() {
+  if ($("#timerSound")) return;
+  const settingsGrid = $("#settings .settings-grid");
+  const rewardSettings = settingsGrid?.querySelector(".reward-settings");
+  if (!settingsGrid || !rewardSettings) return;
+  rewardSettings.insertAdjacentHTML("beforebegin", `<fieldset class="sound-settings"><legend>Sounds</legend><small>Choose a preset or upload your own audio file.</small><label>Study timer ringtone<select id="timerSound"><option value="timer">Focus bell</option><option value="soft">Soft chime</option><option value="bright">Bright notes</option><option value="off">Muted</option></select></label><label>Upload study timer sound<input id="timerSoundFile" type="file" accept="audio/*"></label><label>Account alert tone<select id="alertSound"><option value="reminder">Reminder bell</option><option value="soft">Soft chime</option><option value="bright">Bright notes</option><option value="off">Muted</option></select></label><label>Upload account alert sound<input id="alertSoundFile" type="file" accept="audio/*"></label><button class="soft-button" id="testSounds" type="button">Test sounds</button></fieldset>`);
+  $("#timerSound").onchange = async () => { window.__soundSettings.timer = $("#timerSound").value; await saveSettingPatch({ soundSettings: { ...window.__soundSettings } }); };
+  $("#alertSound").onchange = async () => { window.__soundSettings.alert = $("#alertSound").value; await saveSettingPatch({ soundSettings: { ...window.__soundSettings } }); };
+  $("#testSounds").onclick = () => { playSound("timer"); setTimeout(() => playSound("reminder"), 350); };
+  $("#timerSoundFile").onchange = async () => { const file = $("#timerSoundFile").files[0]; if (file) { window.__soundSettings.timerFile = await fileData(file); await saveSettingPatch({ soundSettings: { ...window.__soundSettings } }); toast("Timer sound added ♡"); } };
+  $("#alertSoundFile").onchange = async () => { const file = $("#alertSoundFile").files[0]; if (file) { window.__soundSettings.alertFile = await fileData(file); await saveSettingPatch({ soundSettings: { ...window.__soundSettings } }); toast("Alert sound added ♡"); } };
+}
+function showGoalReminder(data) {
+  const goals = data.goals || [];
+  const content = goals.length
+    ? goals.map((goal) => `<p><strong>${esc(goal.title)}</strong>${goal.target ? ` · target ${esc(goal.target)}` : ""}</p>`).join("")
+    : "<p>There’s no goal for the meantime.</p>";
+  $("#modalBody").innerHTML = `<div class="goal-reminder"><p class="eyebrow">A LITTLE REMINDER</p><h2>Your goals</h2>${content}<button class="primary-button" id="closeGoalReminder">Got it ♡</button></div>`;
+  $("#modal").classList.remove("hidden");
+  $("#closeGoalReminder").onclick = closeModal;
 }
 function formatTime(t) {
   if (!t) return "";
@@ -871,8 +1086,15 @@ function renderPage(page, data) {
   if (page === "journal") renderJournal(data);
   if (page === "rewards") renderRewardStation(data);
   if (page === "settings") {
+    ensureSoundSettings();
+    const soundSettings = data.settings.find((x) => x.id === "main")?.soundSettings || {};
+    window.__soundSettings = { timer: soundSettings.timer || "timer", alert: soundSettings.alert || "reminder" };
+    $("#timerSound").value = window.__soundSettings.timer;
+    $("#alertSound").value = window.__soundSettings.alert;
     $("#settingsName").value = window.plannerName || "";
     $("#settingsFocus").value = window.plannerFocus || "";
+    const profileSettings = data.settings.find((x) => x.id === "main") || {};
+    $("#avatarSelect").value = profileSettings.avatar || "🌸";
     const rewards = { ...DEFAULT_REWARDS, ...(data.settings.find((x) => x.id === "main")?.rewards || {}) };
     Object.keys(DEFAULT_REWARDS).forEach((level) => {
       $(`#reward${level}`).value = rewards[level];
@@ -943,8 +1165,9 @@ function renderHabits(data) {
     ? data.habits
         .map((x) => {
           const days = x.days || 0,
-            p = Math.min(100, (days / 7) * 100);
-          return `<article class="habit-card"><h3>${esc(x.name)}</h3><p>${days}/7 days this week</p><div class="habit-bar"><span style="width:${p}%"></span></div><button data-habit="${x.id}">＋ Mark today</button><button class="small-button" data-del-h="${x.id}">Delete</button></article>`;
+            targetDays = Number(x.targetDays) || 7,
+            p = Math.min(100, (days / targetDays) * 100);
+          return `<article class="habit-card"><h3>${esc(x.name)}</h3><p>${days}/${targetDays} days complete</p><div class="habit-bar"><span style="width:${p}%"></span></div><button data-habit="${x.id}" ${days >= targetDays ? "disabled" : ""}>${days >= targetDays ? "✓ Goal complete" : "＋ Mark today"}</button><button class="small-button" data-edit-h="${x.id}">Edit</button><button class="small-button" data-del-h="${x.id}">Delete</button></article>`;
         })
         .join("")
     : `<div class="empty">No habits yet. Add one small habit 🌱</div>`;
@@ -973,7 +1196,7 @@ function renderJournal(data) {
     pages
       .map(
         (x) =>
-          `<article class="journal-card"><div class="journal-page-icon">${x.title?.slice(0, 1).toUpperCase() || "J"}</div><div class="journal-body"><h3>${esc(x.title)}</h3><small>${esc(x.date)} · Edited ${new Date(x.updated).toLocaleDateString()}</small><p>${esc(x.content)}</p><div class="actions"><button class="small-button" data-edit-j="${x.id}">Open page</button><button class="small-button" data-del-j="${x.id}">Delete</button></div></div></article>`,
+          `<article class="journal-card">${x.images?.length ? `<div class="journal-card-slideshow">${x.images.map((image, index) => `<img class="journal-card-image ${index === 0 ? "active" : ""}" src="${image.data}" alt="${esc(image.name || "Journal photo")}">`).join("")}</div>` : `<div class="journal-page-icon">${x.title?.slice(0, 1).toUpperCase() || "J"}</div>`}<div class="journal-body"><h3>${esc(x.title)}</h3><small>${esc(x.date)} · Edited ${new Date(x.updated).toLocaleDateString()}${x.images?.length ? ` · ${x.images.length} photo${x.images.length === 1 ? "" : "s"}` : ""}</small><p>${esc(x.content)}</p><div class="actions"><button class="small-button" data-edit-j="${x.id}">Open page</button><button class="small-button" data-del-j="${x.id}">Delete</button></div></div></article>`,
       )
       .join("") ||
     `<div class="empty">${journalSearch ? "No pages match your search." : "Your journal is waiting for its first little story 💗"}</div>`;
@@ -1028,6 +1251,23 @@ function renderJournalPageComments() {
     .join("");
   const composing = !composer.classList.contains("hidden");
   addBtn.classList.toggle("hidden", composing);
+}
+function renderJournalPageImages() {
+  const preview = $("#journalPageImagePreview");
+  if (!preview) return;
+  clearInterval(journalImageRotationTimer);
+  preview.innerHTML = journalPageImages.map((image, index) => `<figure class="journal-page-image ${index === 0 ? "active" : ""}"><img src="${image.data}" alt="${esc(image.name || "Journal photo")}"><button type="button" data-remove-journal-image="${index}" title="Remove photo">×</button></figure>`).join("");
+}
+async function addJournalPageImages(files) {
+  for (const file of [...files]) {
+    if (!file.type.startsWith("image/")) continue;
+    if (file.size > 10 * 1024 * 1024) {
+      toast(`${file.name} is larger than 10 MB`);
+      continue;
+    }
+    journalPageImages.push({ id: uid(), name: file.name, data: await fileData(file) });
+  }
+  renderJournalPageImages();
 }
 function resetJournalCommentComposer() {
   const addBtn = $("#journalPageAddComment");
@@ -1087,6 +1327,9 @@ function openJournalPage(entry = {}) {
   journalPageComments = Array.isArray(entry.comments)
     ? entry.comments.map((comment) => ({ ...comment }))
     : [];
+  journalPageImages = Array.isArray(entry.images)
+    ? entry.images.map((image) => ({ ...image }))
+    : [];
   $("#journalPageTitle").value = entry.title || "My Daily Journal";
   $("#journalPageDate").value = entry.date || "";
   $("#journalPageContent").value = entry.content || "";
@@ -1094,6 +1337,7 @@ function openJournalPage(entry = {}) {
   renderJournalPageProperties();
   resetJournalCommentComposer();
   renderJournalPageComments();
+  renderJournalPageImages();
   closeJournalPropertyPicker();
   updateJournalDateTrigger();
   autoResizeJournalContent();
@@ -1110,6 +1354,7 @@ async function saveJournalPage() {
     content: $("#journalPageContent").value,
     properties: collectJournalPageProperties(),
     comments: journalPageComments,
+    images: journalPageImages,
     updated: Date.now(),
   };
   await put("journal", o);
@@ -1122,6 +1367,8 @@ function closeJournalPage() {
   activeJournalEntry = null;
   journalPageProperties = [];
   journalPageComments = [];
+  journalPageImages = [];
+  clearInterval(journalImageRotationTimer);
   closeJournalPropertyPicker();
   resetJournalCommentComposer();
   show("journal");
@@ -1139,11 +1386,15 @@ function form(type, x = {}) {
   const defs = {
     routine: {
       title: x.id ? "Edit Routine" : "Add Routine",
-      body: `<label>Title<input name="title" required value="${esc(x.title)}" placeholder="Morning routine"></label><div class="two"><label>Start time<input name="time" type="time" required value="${esc(x.time || "07:00")}"></label><label>Due time<input name="endTime" type="time" required value="${esc(x.endTime || "08:00")}"></label></div><label>Date<input name="date" type="date" required value="${esc(x.date || currentDate)}"></label><label>Description<textarea name="description">${esc(x.description)}</textarea></label><label>Category<select name="category">${["routine", "study", "break", "personal", "health"].map((v) => `<option ${x.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Study duration (minutes)<input name="minutes" type="number" min="1" max="720" value="${Number(x.minutes) || 45}"><small>Used by the study timer when this is a study schedule.</small></label>`,
+      body: `<label>Title<input name="title" required value="${esc(x.title)}" placeholder="Morning routine"></label><div class="two"><label>Start time<input name="time" type="time" required value="${esc(x.time || "07:00")}"></label><label>Due time<input name="endTime" type="time" required value="${esc(x.endTime || "08:00")}"></label></div><label>Date<input name="date" type="date" required value="${esc(x.date || currentDate)}"></label><label>Description<textarea name="description">${esc(x.description)}</textarea></label><label>Category<select name="category">${["routine", "study", "break", "personal", "health"].map((v) => `<option ${x.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Color<select name="color"><option value="pink" ${x.color === "pink" ? "selected" : ""}>Pink</option><option value="lavender" ${x.color === "lavender" ? "selected" : ""}>Lavender</option><option value="peach" ${x.color === "peach" ? "selected" : ""}>Peach</option><option value="mint" ${x.color === "mint" ? "selected" : ""}>Mint</option></select></label><label>Study duration (minutes)<input name="minutes" type="number" min="1" max="720" value="${Number(x.minutes) || 45}"><small>Used by the study timer when this is a study schedule.</small></label>`,
     },
     activity: {
       title: x.id ? "Edit Task" : "Add Task",
-      body: `<label>Title<input name="title" required value="${esc(x.title)}"></label><label>Description<textarea name="description">${esc(x.description)}</textarea></label><label>Due date<input name="due" type="date" required value="${esc(x.due || currentDate)}"></label><div class="two"><label>Start time<input name="startTime" type="time" required value="${esc(x.startTime || "09:00")}"></label><label>Due time<input name="time" type="time" required value="${esc(x.time || "10:00")}"></label></div><div class="two"><label>Type<select name="type">${["assignment", "quiz", "project", "presentation", "event", "other"].map((v) => `<option ${x.type === v ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Priority<select name="priority">${["low", "medium", "high"].map((v) => `<option ${x.priority === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>`,
+      body: `<label>Title<input name="title" required value="${esc(x.title)}"></label><label>Description<textarea name="description">${esc(x.description)}</textarea></label><label>Due date<input name="due" type="date" required value="${esc(x.due || currentDate)}"></label><div class="two"><label>Start time<input name="startTime" type="time" required value="${esc(x.startTime || "09:00")}"></label><label>Due time<input name="time" type="time" required value="${esc(x.time || "10:00")}"></label></div><div class="two"><label>Type<select name="type">${["assignment", "quiz", "project", "presentation", "event", "other"].map((v) => `<option ${x.type === v ? "selected" : ""}>${v}</option>`).join("")}</select></label><label>Priority<select name="priority">${["low", "medium", "high"].map((v) => `<option ${x.priority === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div><label>Color<select name="color"><option value="pink" ${x.color === "pink" ? "selected" : ""}>Pink</option><option value="lavender" ${x.color === "lavender" ? "selected" : ""}>Lavender</option><option value="peach" ${x.color === "peach" ? "selected" : ""}>Peach</option><option value="mint" ${x.color === "mint" ? "selected" : ""}>Mint</option></select></label>`,
+    },
+    event: {
+      title: x.id ? "Edit Event" : "Add Event",
+      body: `<label>Event name<input name="title" required value="${esc(x.title)}" placeholder="Birthday party"></label><label>Description<textarea name="description" placeholder="What is happening on this date?">${esc(x.description)}</textarea></label><label>Date<input name="date" type="date" required value="${esc(x.date || currentDate)}"></label><label>Event logo<select name="icon">${["🎉 Birthday", "🎂 Cake", "🎓 Graduation", "💍 Wedding", "✈️ Travel", "🎵 Concert", "🏆 Milestone", "📌 Other"].map((option) => { const icon = option.split(" ")[0]; return `<option value="${icon}" ${x.icon === icon ? "selected" : ""}>${option}</option>`; }).join("")}</select></label><label>Color<select name="color"><option value="pink" ${x.color === "pink" ? "selected" : ""}>Pink</option><option value="peach" ${x.color === "peach" ? "selected" : ""}>Peach</option><option value="lavender" ${x.color === "lavender" ? "selected" : ""}>Lavender</option></select></label>`,
     },
     note: {
       title: x.id ? "Edit Note" : "New Note",
@@ -1155,7 +1406,7 @@ function form(type, x = {}) {
     },
     habit: {
       title: x.id ? "Edit Habit" : "Add Habit",
-      body: `<label>Habit<input name="name" required value="${esc(x.name)}" placeholder="Review notes for 15 minutes"></label>`,
+      body: `<label>Habit<input name="name" required value="${esc(x.name)}" placeholder="Review notes for 15 minutes"></label><label>Habit goal<input name="targetDays" type="number" min="1" max="365" step="1" required value="${Number(x.targetDays) || 7}"></label><small>Choose how many days this habit should last, such as 21 days.</small>`,
     },
     reminder: {
       title: x.id ? "Edit Reminder" : "Add Reminder",
@@ -1172,10 +1423,16 @@ function form(type, x = {}) {
     const o = Object.fromEntries(new FormData(e.target));
     o.id = x.id || uid();
     o.updated = Date.now();
+    if (type === "routine" || type === "activity" || type === "reminder") {
+      o.createdAt = x.createdAt || Date.now();
+    }
     if (type === "routine") o.minutes = Math.max(1, Number(o.minutes) || 45);
     if (type === "routine" || type === "activity" || type === "goal")
       o.done = !!x.done;
-    if (type === "habit") o.days = x.days || 0;
+    if (type === "habit") {
+      o.days = x.days || 0;
+      o.targetDays = Math.min(365, Math.max(1, Number(o.targetDays) || 7));
+    }
     if (type === "note") {
       const f = $("#noteFile").files[0];
       if (f) {
@@ -1203,6 +1460,7 @@ function form(type, x = {}) {
         goal: "goals",
         habit: "habits",
         reminder: "reminders",
+        event: "events",
       }[type],
       o,
     );
@@ -1257,9 +1515,6 @@ async function importData(file) {
     ) {
       throw new Error("This is not a valid planner backup.");
     }
-    if (data.activities.length > MAX_TASKS) {
-      throw new Error(`A backup cannot contain more than ${MAX_TASKS} tasks.`);
-    }
     if (!confirm("Restore this backup? Current planner data will be replaced."))
       return;
     for (const store of stores)
@@ -1310,12 +1565,25 @@ async function ensurePlannerProfileName() {
 async function render() {
   await removeWebDevelopmentSchedule();
   const data = await readData();
+  await syncDeckProgress(data);
   $("#currentDate").value = currentDate;
   window.__data = data;
   const settings = data.settings.find((x) => x.id === "main") || {};
   window.plannerName = activeAccount?.name || settings.name || "Lovely";
   window.plannerFocus = settings.focus || "Be proud of how far you've come.";
+  window.__soundSettings = {
+    timer: settings.soundSettings?.timer || "timer",
+    alert: settings.soundSettings?.alert || "reminder",
+    timerFile: settings.soundSettings?.timerFile || "",
+    alertFile: settings.soundSettings?.alertFile || "",
+  };
+  window.__profileImage = settings.profileImage || "";
+  window.__bannerImage = settings.bannerImage || "";
+  renderProfile(settings);
+  const savedTheme = settings.theme || localStorage.getItem("LovelyDayPlannerTheme") || "light";
+  applyTheme(savedTheme, !settings.theme && Boolean(activeAccount?.token));
   $("#profileName").textContent = `Hello, ${window.plannerName}!`;
+  $("#accountEmail").textContent = window.plannerName;
   const active = $(".page.active")?.id || "dashboard";
   if (active === "dashboard")
     $("#pageTitle").innerHTML =
@@ -1325,7 +1593,18 @@ async function render() {
 document.addEventListener("pointerdown", triggerSoundOnUserInteraction, { passive: true });
 document.addEventListener("keydown", triggerSoundOnUserInteraction, { passive: true });
 document.addEventListener("click", async (e) => {
+  const journalImage = e.target.closest(".journal-card-image, .journal-page-image img");
+  if (journalImage) {
+    $("#modalBody").innerHTML = `<img class="journal-image-lightbox" src="${journalImage.src}" alt="${esc(journalImage.alt || "Journal photo")}">`;
+    $("#modal").classList.remove("hidden");
+    return;
+  }
   const b = e.target.closest("button");
+  const upcomingCard = e.target.closest("#upcomingCard");
+  if (upcomingCard) {
+    await renderUpcomingEvents(await readData());
+    return;
+  }
   const dateEl = e.target.closest("[data-calendar-date]");
   if (dateEl) {
     currentDate = dateEl.dataset.calendarDate;
@@ -1334,21 +1613,15 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (!b) return;
-  if (b.dataset.mobileMore !== undefined) {
-    const menu = $("#mobileMoreMenu");
-    const isHidden = menu.classList.toggle("hidden");
-    b.setAttribute("aria-expanded", String(!isHidden));
-    return;
-  }
   if (b.dataset.page) {
     show(b.dataset.page);
     return;
   }
+  if (b.id === "upcomingCard") {
+    await renderUpcomingEvents(await readData());
+    return;
+  }
   if (b.dataset.add) {
-    if (b.dataset.add === "activity" && (await all("activities")).length >= MAX_TASKS) {
-      toast(`You can only have ${MAX_TASKS} tasks`);
-      return;
-    }
     if (b.dataset.add === "journal") {
       openJournalPage({});
       return;
@@ -1368,8 +1641,16 @@ document.addEventListener("click", async (e) => {
     await toggle("activities", b.dataset.toggleA);
     return;
   }
+  if (b.dataset.toggleE) {
+    await toggle("events", b.dataset.toggleE);
+    return;
+  }
   if (b.dataset.toggleG) {
     await toggle("goals", b.dataset.toggleG);
+    return;
+  }
+  if (b.dataset.editH) {
+    form("habit", (await all("habits")).find((x) => x.id === b.dataset.editH));
     return;
   }
   if (b.dataset.editJ) {
@@ -1385,6 +1666,7 @@ document.addEventListener("click", async (e) => {
     ["editG", "goals", "goal"],
     ["editH", "habits", "habit"],
     ["editRem", "reminders", "reminder"],
+    ["editE", "events", "event"],
   ];
   for (const [key, store, type] of edits)
     if (b.dataset[key]) {
@@ -1402,6 +1684,7 @@ document.addEventListener("click", async (e) => {
     ["delH", "habits"],
     ["delRem", "reminders"],
     ["delJ", "journal"],
+    ["delE", "events"],
   ];
   for (const [key, store] of dels)
     if (b.dataset[key]) {
@@ -1415,7 +1698,8 @@ document.addEventListener("click", async (e) => {
   if (b.dataset.habit) {
     const x = (await all("habits")).find((v) => v.id === b.dataset.habit);
     if (x) {
-      x.days = Math.min(7, (x.days || 0) + 1);
+      const targetDays = Number(x.targetDays) || 7;
+      x.days = Math.min(targetDays, (x.days || 0) + 1);
       x.updated = Date.now();
       await put("habits", x);
       toast("Habit marked for today 🌱");
@@ -1434,7 +1718,7 @@ $("#currentDate").onchange = (e) => {
   render();
 };
 $("#todayButton").onclick = () => {
-  currentDate = localDateKey();
+  currentDate = philippinesDateKey();
   viewMonth = new Date(currentDate + "T12:00:00");
   render();
 };
@@ -1455,6 +1739,10 @@ $("#prevMonth").onclick = () => {
 $("#nextMonth").onclick = () => {
   viewMonth.setMonth(viewMonth.getMonth() + 1);
   render();
+};
+$("#upcomingCard").onclick = async (event) => {
+  event.stopPropagation();
+  await renderUpcomingEvents(await readData());
 };
 $("#shareButton").onclick = async () => {
   const text = `My planner streak: ${streakDays(window.__data)} days ♡`;
@@ -1487,9 +1775,37 @@ $("#saveSettings").onclick = async () => {
         $(`#reward${level}`).value.trim() || DEFAULT_REWARDS[level],
       ]),
     ),
+    avatar: $("#avatarSelect").value,
+    profileImage: window.__profileImage || $("#profileImage").src || "",
+    bannerImage: window.__bannerImage || $("#bannerImage").src || "",
+    soundSettings: { ...window.__soundSettings },
+    theme: $("#themeSelect").value,
   });
   toast("Settings saved ♡");
   render();
+};
+  $("#themeSelect").onchange = async (e) => {
+    await applyTheme(e.target.value, true);
+  };
+$("#avatarSelect").onchange = (e) => {
+  $("#avatarIcon").textContent = e.target.value;
+  $("#avatarIcon").classList.remove("hidden");
+  $("#profileImage").classList.add("hidden");
+    saveSettingPatch({ avatar: e.target.value });
+};
+$("#profileImageFile").onchange = async () => {
+  const file = $("#profileImageFile").files[0];
+  if (!file) return;
+  window.__profileImage = await fileData(file);
+  renderProfile({ profileImage: window.__profileImage, avatar: $("#avatarSelect").value, bannerImage: window.__bannerImage });
+  await saveSettingPatch({ profileImage: window.__profileImage });
+};
+$("#bannerImageFile").onchange = async () => {
+  const file = $("#bannerImageFile").files[0];
+  if (!file) return;
+  window.__bannerImage = await fileData(file);
+  renderProfile({ profileImage: window.__profileImage, avatar: $("#avatarSelect").value, bannerImage: window.__bannerImage });
+  await saveSettingPatch({ bannerImage: window.__bannerImage });
 };
 $("#clearData").onclick = async () => {
   if (!confirm("Reset all planner data stored in this browser?")) return;
@@ -1542,6 +1858,16 @@ $("#journalPageDateTrigger").onclick = () => {
 $("#journalPageDate").onchange = syncJournalPageDate;
 $("#journalPageDate").oninput = syncJournalPageDate;
 $("#journalPageContent").oninput = autoResizeJournalContent;
+$("#journalPageImages").onchange = async (e) => {
+  await addJournalPageImages(e.target.files);
+  e.target.value = "";
+};
+$("#journalPageImagePreview").onclick = (e) => {
+  const removeButton = e.target.closest("[data-remove-journal-image]");
+  if (!removeButton) return;
+  journalPageImages.splice(Number(removeButton.dataset.removeJournalImage), 1);
+  renderJournalPageImages();
+};
 $("#journalPageAddProperty").onclick = (e) => {
   e.stopPropagation();
   toggleJournalPropertyPicker();
@@ -1631,6 +1957,7 @@ async function startPlanner() {
   try {
     await openDB();
     if (remoteAuthEnabled && activeAccount?.token) await loadRemotePlanner();
+    await loadStudyTimer();
     let d = await readData();
     if (
       !d.routines.length &&
@@ -1659,6 +1986,7 @@ async function startPlanner() {
     ]);
     for (const date of dates) await syncStreak(date, d);
     await render();
+    showGoalReminder(await readData());
   } catch (err) {
     plannerStarted = false;
     console.error(err);

@@ -27,6 +27,7 @@ A cute pastel planner dashboard recreated from the requested design, with the or
 - Persisted streak records that activate only after completing a routine or task
 - Daily rewards refresh by date, and weekly rewards refresh by week
 - Reward claims are stored independently for each day and week
+- Study timer state is stored per account and synchronized with the planner database
 
 ## Run locally
 
@@ -40,9 +41,31 @@ Open `http://localhost:3000`. The deployed frontend is configured to call `https
 
 ## Accounts and storage
 
-The Node server stores accounts and planner snapshots in `data/server-db.json`. Passwords use Node's `scrypt` hash, and each login receives a session token. The browser keeps an IndexedDB cache and synchronizes changes to the server automatically.
+The Node server stores accounts and planner snapshots in `data/server-db.json`. Passwords use Node's `scrypt` hash, and each login receives a session token. The browser keeps an IndexedDB cache, including all planner stores and study timer state, and synchronizes changes to the server automatically.
 
 For production, deploy `server.js` to a Node host with persistent disk storage and HTTPS. Do not use ephemeral storage, or the database file will be lost on restart. Set `DATA_DIR` to the mounted disk directory (for example, `/var/data` on Render) and set a stable random `SESSION_SECRET` environment variable. The frontend can be hosted by this same server or configured with `window.PLANNER_CONFIG.apiBase` in `index.html` to point to the HTTPS server URL. If frontend and backend use different domains, set the server's `CLIENT_ORIGIN` environment variable to the frontend origin.
+
+### Free Render storage with Supabase
+
+Free Render services do not provide durable disks. Create a free Supabase project and run this SQL in its SQL Editor:
+
+```sql
+create table planner_users (
+	id uuid primary key,
+	email text unique not null,
+	name text not null,
+	salt text not null,
+	hash text not null,
+	created_at timestamptz not null
+);
+
+create table planner_data (
+	user_id uuid primary key references planner_users(id) on delete cascade,
+	data jsonb not null default '{}'::jsonb
+);
+```
+
+Then add these Render environment variables: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and a stable random `SESSION_SECRET`. Keep the service-role key only in Render, never in frontend files. Redeploy after saving the variables. Existing accounts from the temporary Render filesystem cannot be recovered unless you have a database backup.
 
 ## GitHub Pages
 
